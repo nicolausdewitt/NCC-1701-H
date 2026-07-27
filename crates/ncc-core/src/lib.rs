@@ -57,6 +57,20 @@ pub struct ProjectConnection {
     /// Optional existing checkout used by local tools and engineering agents.
     pub workspace_path: Option<String>,
     pub default_branch: String,
+    /// Connecting a repository never grants mutation authority by itself.
+    #[serde(default)]
+    pub access: ProjectAccess,
+    /// Opaque native secret-store reference. Never a token or password.
+    #[serde(default)]
+    pub credential_profile: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectAccess {
+    #[default]
+    ReadOnly,
+    ReadWrite,
 }
 
 impl ProjectConnection {
@@ -80,6 +94,15 @@ impl ProjectConnection {
             return Err(ProjectConnectionError::EmptyField("workspace_path"));
         }
 
+        if self.access == ProjectAccess::ReadWrite
+            && self
+                .credential_profile
+                .as_deref()
+                .is_none_or(|profile| profile.trim().is_empty())
+        {
+            return Err(ProjectConnectionError::WriteAccessRequiresCredential);
+        }
+
         Ok(())
     }
 }
@@ -87,12 +110,19 @@ impl ProjectConnection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProjectConnectionError {
     EmptyField(&'static str),
+    WriteAccessRequiresCredential,
 }
 
 impl std::fmt::Display for ProjectConnectionError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyField(field) => write!(formatter, "project {field} must not be empty"),
+            Self::WriteAccessRequiresCredential => {
+                write!(
+                    formatter,
+                    "write access requires a native credential profile"
+                )
+            }
         }
     }
 }
@@ -369,11 +399,33 @@ mod tests {
             repository: "https://github.com/example/private-project".into(),
             workspace_path: Some(r"C:\src\private-project".into()),
             default_branch: "main".into(),
+            access: ProjectAccess::ReadOnly,
+            credential_profile: None,
         };
 
         assert_eq!(connection.validate(), Ok(()));
         let json = serde_json::to_string(&connection).unwrap();
         assert!(!json.contains("token"));
-        assert!(!json.contains("credential"));
+        assert!(!json.contains("password"));
+    }
+
+    #[test]
+    fn write_access_requires_only_a_secret_store_reference() {
+        let mut connection = ProjectConnection {
+            adapter: "github".into(),
+            display_name: "Example".into(),
+            repository: "https://github.com/example/project".into(),
+            workspace_path: None,
+            default_branch: "main".into(),
+            access: ProjectAccess::ReadWrite,
+            credential_profile: None,
+        };
+
+        assert_eq!(
+            connection.validate(),
+            Err(ProjectConnectionError::WriteAccessRequiresCredential)
+        );
+        connection.credential_profile = Some("os-keychain:github/example".into());
+        assert_eq!(connection.validate(), Ok(()));
     }
 }

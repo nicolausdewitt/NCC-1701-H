@@ -39,6 +39,14 @@ type ProjectConnection = {
   repository: string;
   workspace_path: string | null;
   default_branch: string;
+  access: "read_only" | "read_write";
+  credential_profile: string | null;
+};
+
+type GithubWriteAuthorization = {
+  connection: ProjectConnection;
+  account: string;
+  permission: string;
 };
 
 type Scene = "bridge" | "plan" | "engineering" | "crew";
@@ -152,6 +160,13 @@ const projectNameInput = document.querySelector<HTMLInputElement>("#project-name
 const projectRepositoryInput = document.querySelector<HTMLInputElement>("#project-repository-input");
 const projectWorkspaceInput = document.querySelector<HTMLInputElement>("#project-workspace-input");
 const projectBranchInput = document.querySelector<HTMLInputElement>("#project-branch-input");
+const projectConnectButton = document.querySelector<HTMLButtonElement>("#project-connect-button");
+const projectConnectionResult = document.querySelector<HTMLElement>("#project-connection-result");
+const projectResultTitle = document.querySelector<HTMLElement>("#project-result-title");
+const projectResultDetail = document.querySelector<HTMLElement>("#project-result-detail");
+const projectStepState = document.querySelector<HTMLElement>("#project-step-state");
+const githubAuthorizeButton = document.querySelector<HTMLButtonElement>("#github-authorize-button");
+const commandModelSettings = document.querySelector<HTMLElement>(".command-model-settings");
 const commandModelForm = document.querySelector<HTMLFormElement>("#command-model-form");
 const commandProviderInput = document.querySelector<HTMLInputElement>("#command-provider-input");
 const commandModelInput = document.querySelector<HTMLInputElement>("#command-model-input");
@@ -208,15 +223,39 @@ projectForm?.addEventListener("submit", async (event) => {
     repository: projectRepositoryInput.value.trim(),
     workspace_path: projectWorkspaceInput.value.trim() || null,
     default_branch: projectBranchInput.value.trim(),
+    access: "read_only",
+    credential_profile: null,
   };
-  const submitButton = projectForm.querySelector<HTMLButtonElement>("button[type='submit']");
-  if (submitButton) submitButton.disabled = true;
+  if (projectConnectButton) {
+    projectConnectButton.disabled = true;
+    projectConnectButton.textContent = "CONTACTING ADAPTER…";
+  }
+  setProjectConnectionFeedback("connecting", "CONTACTING ADAPTER", connection.adapter.toUpperCase());
+  const connectionStartedAt = performance.now();
 
   try {
     const saved = isNative
       ? await invoke<ProjectConnection>("connect_project", { connection })
       : connection;
+    await holdFeedbackFor(connectionStartedAt, 500);
     renderProjectConnection(saved);
+    setProjectConnectionFeedback(
+      isNative ? "connected" : "preview",
+      saved.adapter === "github" ? "READ ONLY" : isNative ? "GIT TARGET SAVED" : "PREVIEW CONFIGURED",
+      saved.adapter === "github"
+        ? "AUTHORISE BEFORE CHANGES"
+        : isNative
+          ? `${saved.adapter.toUpperCase()} · ${saved.default_branch}`
+          : "NATIVE APP PERSISTS IT",
+    );
+    showGithubWriteOffer(saved);
+    if (projectConnectButton) {
+      projectConnectButton.textContent = isNative ? "UPDATE PROJECT" : "CONFIGURED FOR PREVIEW";
+    }
+    if (projectStepState) {
+      projectStepState.textContent = isNative ? "WARP CORE SAVED" : "PREVIEW ONLY";
+    }
+    commandModelSettings?.classList.add("next-step");
     setText(
       "#system-status",
       isNative
@@ -224,9 +263,13 @@ projectForm?.addEventListener("submit", async (event) => {
         : "VISUAL PREVIEW · PROJECT CONNECTION SIMULATED",
     );
   } catch (error) {
+    const message = String(error);
+    setProjectConnectionFeedback("error", "CONNECTION REJECTED", message);
+    if (projectConnectButton) projectConnectButton.textContent = "RETRY CONNECTION";
+    if (projectStepState) projectStepState.textContent = "ACTION REQUIRED";
     setText("#system-status", `PROJECT REJECTED · ${String(error)}`);
   } finally {
-    if (submitButton) submitButton.disabled = false;
+    if (projectConnectButton) projectConnectButton.disabled = false;
   }
 });
 
@@ -317,7 +360,21 @@ async function connectWarpCore() {
     setText("#metric-officers", String(crew.leaders.length).padStart(2, "0"));
     setText("#metric-queue", String(status.queued + status.retry).padStart(2, "0"));
     renderCrew(crew);
-    if (project) renderProjectConnection(project);
+    if (project) {
+      renderProjectConnection(project);
+      setProjectConnectionFeedback(
+        "connected",
+        project.adapter === "github" && project.access === "read_only"
+          ? "READ ONLY"
+          : "GIT TARGET SAVED",
+        project.adapter === "github" && project.access === "read_only"
+          ? "AUTHORISE BEFORE CHANGES"
+          : `${project.adapter.toUpperCase()} · ${project.default_branch}`,
+      );
+      showGithubWriteOffer(project);
+      if (projectConnectButton) projectConnectButton.textContent = "UPDATE PROJECT";
+      if (projectStepState) projectStepState.textContent = "WARP CORE SAVED";
+    }
   } catch (error) {
     setText("#system-status", `WARP CORE OFFLINE · ${String(error)}`);
   }
@@ -447,7 +504,7 @@ function renderProjectConnection(connection: ProjectConnection) {
   setText("#project-name", connection.display_name.toUpperCase());
   setText(
     "#project-summary",
-    `${connection.repository} · ${connection.default_branch}`,
+    `${connection.repository} · ${connection.default_branch} · ${connection.access === "read_write" ? "WRITE ENABLED" : "READ ONLY"}`,
   );
 
   if (projectAdapterInput) projectAdapterInput.value = connection.adapter;
@@ -455,6 +512,92 @@ function renderProjectConnection(connection: ProjectConnection) {
   if (projectRepositoryInput) projectRepositoryInput.value = connection.repository;
   if (projectWorkspaceInput) projectWorkspaceInput.value = connection.workspace_path ?? "";
   if (projectBranchInput) projectBranchInput.value = connection.default_branch;
+
+  pulseRefresh(
+    document.querySelector<HTMLElement>("#project-name"),
+    document.querySelector<HTMLElement>("#project-adapter"),
+  );
+}
+
+function showGithubWriteOffer(connection: ProjectConnection) {
+  const shouldOffer = connection.adapter === "github" && connection.access === "read_only";
+  if (githubAuthorizeButton) {
+    githubAuthorizeButton.hidden = !shouldOffer;
+    githubAuthorizeButton.textContent = "AUTHORISE";
+  }
+  projectConnectionResult?.classList.toggle("has-action", shouldOffer);
+}
+
+githubAuthorizeButton?.addEventListener("click", async () => {
+  githubAuthorizeButton.hidden = true;
+  projectConnectionResult?.classList.remove("has-action");
+
+  if (!isNative) {
+    setProjectConnectionFeedback(
+      "preview",
+      "NATIVE AUTH REQUIRED",
+      "OPEN NCC TO AUTHORISE VIA GITHUB",
+    );
+    return;
+  }
+
+  setProjectConnectionFeedback("connecting", "OPENING GITHUB", "COMPLETE BROWSER AUTHORISATION");
+  setText("#system-status", "WAITING FOR GITHUB AUTHORISATION");
+  try {
+    const authorization = await invoke<GithubWriteAuthorization>("authorize_github_writes");
+    renderProjectConnection(authorization.connection);
+    showGithubWriteOffer(authorization.connection);
+    setProjectConnectionFeedback(
+      "connected",
+      "WRITE ENABLED",
+      `${authorization.account.toUpperCase()} · ${authorization.permission}`,
+    );
+    if (projectStepState) projectStepState.textContent = "GITHUB API AUTHORISED";
+    setText(
+      "#system-status",
+      `GITHUB API CONNECTED · ${authorization.account.toUpperCase()} · ${authorization.permission}`,
+    );
+  } catch (error) {
+    setProjectConnectionFeedback("error", "GITHUB AUTH FAILED", String(error));
+    githubAuthorizeButton.hidden = false;
+    githubAuthorizeButton.textContent = "RETRY AUTH";
+    projectConnectionResult?.classList.add("has-action");
+    setText("#system-status", `GITHUB AUTHORISATION FAILED · ${String(error)}`);
+  }
+});
+
+function setProjectConnectionFeedback(
+  state: "idle" | "connecting" | "connected" | "preview" | "error",
+  title: string,
+  detail: string,
+) {
+  if (projectConnectionResult) projectConnectionResult.dataset.state = state;
+  if (projectResultTitle) projectResultTitle.textContent = title;
+  if (projectResultDetail) projectResultDetail.textContent = detail;
+  if (state === "connected" || state === "preview" || state === "error") {
+    pulseRefresh(projectConnectionResult);
+  }
+}
+
+function pulseRefresh(...elements: Array<HTMLElement | null>) {
+  for (const element of elements) {
+    if (!element) continue;
+    element.classList.remove("data-refresh-pulse");
+    void element.offsetWidth;
+    element.classList.add("data-refresh-pulse");
+    element.addEventListener(
+      "animationend",
+      () => element.classList.remove("data-refresh-pulse"),
+      { once: true },
+    );
+  }
+}
+
+async function holdFeedbackFor(startedAt: number, minimumMs: number) {
+  const remaining = minimumMs - (performance.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise((resolve) => window.setTimeout(resolve, remaining));
+  }
 }
 
 function departmentDotClass(department: string) {

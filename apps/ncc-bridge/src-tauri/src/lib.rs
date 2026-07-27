@@ -1,7 +1,10 @@
-use std::{fs, sync::Arc};
+use std::{fs, process::Command, sync::Arc};
 
-use ncc_core::{CrewId, CrewManifest, ModelAssignment, ProjectConnection, example_manifest};
+use ncc_core::{
+    CrewId, CrewManifest, ModelAssignment, ProjectAccess, ProjectConnection, example_manifest,
+};
 use ncc_warpcore::{SaveIntent, ServerSaveCommand, WarpCore, WarpCoreStatus};
+use serde::Serialize;
 use tauri::{Manager, State};
 
 const SYSTEM_COLLECTION: &str = "system";
@@ -10,6 +13,13 @@ const PROJECT_CONNECTION_ID: &str = "active-project";
 
 struct BridgeState {
     warp_core: Arc<WarpCore>,
+}
+
+#[derive(Serialize)]
+struct GithubWriteAuthorization {
+    connection: ProjectConnection,
+    account: String,
+    permission: String,
 }
 
 /// Read requests also pass through the Warp Core. The webview never opens or
@@ -140,6 +150,10 @@ async fn connect_project(
         .workspace_path
         .map(|path| path.trim().to_string());
     connection.default_branch = connection.default_branch.trim().to_string();
+    // Connecting a repository never grants mutation authority. Only the
+    // dedicated native GitHub authorization command may upgrade this record.
+    connection.access = ProjectAccess::ReadOnly;
+    connection.credential_profile = None;
     connection.validate().map_err(|error| error.to_string())?;
 
     let warp_core = state.warp_core.clone();
@@ -158,6 +172,146 @@ async fn connect_project(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// Uses GitHub CLI's browser authorization and API client. The CLI owns its
+/// token; NCC receives only the account and repository permission, then stores
+/// an opaque credential-profile reference in Warp Core.
+#[tauri::command]
+async fn authorize_github_writes(
+    state: State<'_, BridgeState>,
+) -> Result<GithubWriteAuthorization, String> {
+    let warp_core = state.warp_core.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let stored = warp_core
+            .document(SYSTEM_COLLECTION, PROJECT_CONNECTION_ID)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "connect a project before authorizing GitHub".to_string())?;
+        let mut connection: ProjectConnection = stored
+            .document
+            .ok_or_else(|| "project connection has been deleted".to_string())
+            .and_then(|value| serde_json::from_value(value).map_err(|error| error.to_string()))?;
+
+        if connection.adapter != "github" {
+            return Err("write authorization is available only for the GitHub adapter".into());
+        }
+
+        let repository = github_repository_slug(&connection.repository)?;
+        ensure_github_cli_authorized()?;
+        let account = gh_text(&["api", "user", "--jq", ".login"])?;
+        let permission = gh_text(&[
+            "repo",
+            "view",
+            &repository,
+            "--json",
+            "viewerPermission",
+            "--jq",
+            ".viewerPermission",
+        ])?;
+
+        if !matches!(permission.as_str(), "WRITE" | "MAINTAIN" | "ADMIN") {
+            return Err(format!(
+                "GitHub reports {permission} access for {account}; write access was not granted"
+            ));
+        }
+
+        connection.access = ProjectAccess::ReadWrite;
+        connection.credential_profile = Some(format!("gh-cli:github.com/{account}"));
+        connection.validate().map_err(|error| error.to_string())?;
+
+        let mut intent = SaveIntent::upsert(
+            SYSTEM_COLLECTION,
+            PROJECT_CONNECTION_ID,
+            serde_json::to_value(&connection).map_err(|error| error.to_string())?,
+        );
+        intent.expected_local_version = Some(stored.local_version);
+        warp_core.save(intent).map_err(|error| error.to_string())?;
+
+        Ok(GithubWriteAuthorization {
+            connection,
+            account,
+            permission,
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ensure_github_cli_authorized() -> Result<(), String> {
+    let status = Command::new("gh")
+        .args(["auth", "status", "--hostname", "github.com"])
+        .output()
+        .map_err(|error| {
+            format!(
+                "GitHub CLI is required for native authorization but could not be started: {error}"
+            )
+        })?;
+
+    if status.status.success() {
+        return Ok(());
+    }
+
+    let login = Command::new("gh")
+        .args([
+            "auth",
+            "login",
+            "--hostname",
+            "github.com",
+            "--git-protocol",
+            "https",
+            "--web",
+            "--clipboard",
+        ])
+        .output()
+        .map_err(|error| format!("could not start GitHub browser authorization: {error}"))?;
+
+    if login.status.success() {
+        Ok(())
+    } else {
+        Err("GitHub browser authorization was not completed".into())
+    }
+}
+
+fn gh_text(arguments: &[&str]) -> Result<String, String> {
+    let output = Command::new("gh")
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("could not call the GitHub API: {error}"))?;
+    if !output.status.success() {
+        return Err("GitHub API request failed; check the selected account and repository".into());
+    }
+
+    let value = String::from_utf8(output.stdout)
+        .map_err(|_| "GitHub API returned non-UTF-8 output".to_string())?
+        .trim()
+        .to_string();
+    if value.is_empty() {
+        return Err("GitHub API returned an empty response".into());
+    }
+    Ok(value)
+}
+
+fn github_repository_slug(repository: &str) -> Result<String, String> {
+    let repository = repository
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git");
+    let path = repository
+        .strip_prefix("https://github.com/")
+        .or_else(|| repository.strip_prefix("http://github.com/"))
+        .or_else(|| repository.strip_prefix("git@github.com:"))
+        .or_else(|| repository.strip_prefix("github.com/"))
+        .ok_or_else(|| "GitHub repository must use a github.com URL".to_string())?;
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() != 2 || parts.iter().any(|part| part.trim().is_empty()) {
+        return Err("GitHub repository must identify exactly one owner and repository".into());
+    }
+    if parts.iter().flat_map(|part| part.chars()).any(|character| {
+        !(character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+    }) {
+        return Err("GitHub repository contains unsupported characters".into());
+    }
+    Ok(format!("{}/{}", parts[0], parts[1]))
 }
 
 #[tauri::command]
@@ -276,9 +430,33 @@ pub fn run() {
             get_warp_core_status,
             get_project_connection,
             connect_project,
+            authorize_github_writes,
             submit_captain_message,
             submit_staffing_brief
         ])
         .run(tauri::generate_context!())
         .expect("failed to run NCC-1701-H");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::github_repository_slug;
+
+    #[test]
+    fn parses_https_and_ssh_github_repositories() {
+        assert_eq!(
+            github_repository_slug("https://github.com/example/project.git").unwrap(),
+            "example/project"
+        );
+        assert_eq!(
+            github_repository_slug("git@github.com:example/project").unwrap(),
+            "example/project"
+        );
+    }
+
+    #[test]
+    fn rejects_non_github_and_nested_paths() {
+        assert!(github_repository_slug("https://example.com/owner/repo").is_err());
+        assert!(github_repository_slug("https://github.com/owner/repo/issues").is_err());
+    }
 }

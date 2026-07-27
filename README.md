@@ -83,6 +83,15 @@ not a token. Git and model credentials remain in native adapters and secret
 stores. A private codebase is therefore connected at runtime rather than copied
 into, referenced by, or compiled with NCC-1701-H.
 
+Connections begin read-only. The Bridge offers a separate GitHub authorization
+step before any agent may change a repository, and stores only a native
+credential-profile reference after authorization.
+
+The initial native GitHub provider uses GitHub CLI's browser authorization and
+API client. Read-only connections do not require it; write authorization
+requires `gh` to be installed and verifies the selected account's permission on
+that exact repository.
+
 A private codebase is just one mission target and receives no special case in
 the public code, so another developer can point the same ship at their own
 repository and enjoy the same framework.

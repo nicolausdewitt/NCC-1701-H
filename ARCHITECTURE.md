@@ -75,6 +75,20 @@ native adapters outside the webview. A public `github` or `local-git` adapter
 can serve ordinary repositories, while a private project may supply an external
 adapter without modifying or forking the harness.
 
+Every newly connected project is read-only. Write access requires a separate,
+explicit owner authorization and an opaque reference to credentials held by the
+operating-system secret store. A repository URL, successful read, or staffing
+brief can never imply permission to create branches, commits, issues, pull
+requests, or releases. GitHub authorization uses a native OAuth/GitHub App or
+credential-manager flow; passwords and tokens are never collected by the LCARS
+webview or written into Warp Core.
+
+The first native credential provider delegates browser authorization and token
+custody to GitHub CLI. The Rust process then uses `gh api`/GraphQL to read the
+signed-in account and its exact repository permission. Warp Core upgrades the
+connection to `read_write` only for `WRITE`, `MAINTAIN`, or `ADMIN`, and stores
+only an opaque `gh-cli:github.com/<account>` profile reference.
+
 Project adapters translate between this stable contract and a repository's
 actual issue tracker, commands, tests, documents, and deployment systems. The
 crew and UI depend only on the contract. A private codebase is therefore a

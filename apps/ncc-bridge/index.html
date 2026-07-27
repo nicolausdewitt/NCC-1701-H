@@ -133,7 +133,7 @@
             <article class="settings-panel project-settings">
               <header>
                 <span>01 / CONNECT GIT</span>
-                <b>PROJECT ADAPTER</b>
+                <b id="project-step-state">PROJECT ADAPTER</b>
               </header>
               <form id="project-form" class="project-form">
                 <label>
@@ -169,7 +169,28 @@
                   <span>DEFAULT BRANCH</span>
                   <input id="project-branch-input" name="defaultBranch" value="main" required />
                 </label>
-                <button type="submit">CONNECT PROJECT</button>
+                <button id="project-connect-button" type="submit">CONNECT PROJECT</button>
+                <div
+                  id="project-connection-result"
+                  class="connection-result"
+                  data-state="idle"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <i aria-hidden="true"></i>
+                  <span>
+                    <strong id="project-result-title">NOT CONNECTED</strong>
+                    <small id="project-result-detail">AWAITING PROJECT</small>
+                  </span>
+                  <button
+                    id="github-authorize-button"
+                    type="button"
+                    title="Authorise GitHub write access"
+                    hidden
+                  >
+                    AUTHORISE
+                  </button>
+                </div>
               </form>
               <p class="settings-note">Git credentials stay with the adapter, never the webview.</p>
             </article>
