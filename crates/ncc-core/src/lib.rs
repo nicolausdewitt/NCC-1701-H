@@ -41,6 +41,64 @@ impl ModelAssignment {
     }
 }
 
+/// A project commissioned into the harness.
+///
+/// This record intentionally contains no access token or project-specific
+/// schema. The named adapter resolves credentials and translates the generic
+/// project contract at runtime.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectConnection {
+    /// Adapter identifier, such as `local-git`, `github`, or a private sidecar.
+    pub adapter: String,
+    /// Human-facing project name shown on the Bridge.
+    pub display_name: String,
+    /// Adapter-specific repository locator, normally a Git remote URL.
+    pub repository: String,
+    /// Optional existing checkout used by local tools and engineering agents.
+    pub workspace_path: Option<String>,
+    pub default_branch: String,
+}
+
+impl ProjectConnection {
+    pub fn validate(&self) -> Result<(), ProjectConnectionError> {
+        for (field, value) in [
+            ("adapter", self.adapter.as_str()),
+            ("display_name", self.display_name.as_str()),
+            ("repository", self.repository.as_str()),
+            ("default_branch", self.default_branch.as_str()),
+        ] {
+            if value.trim().is_empty() {
+                return Err(ProjectConnectionError::EmptyField(field));
+            }
+        }
+
+        if self
+            .workspace_path
+            .as_deref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            return Err(ProjectConnectionError::EmptyField("workspace_path"));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectConnectionError {
+    EmptyField(&'static str),
+}
+
+impl std::fmt::Display for ProjectConnectionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyField(field) => write!(formatter, "project {field} must not be empty"),
+        }
+    }
+}
+
+impl std::error::Error for ProjectConnectionError {}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TeamLeader {
     pub id: CrewId,
@@ -52,6 +110,10 @@ pub struct TeamLeader {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CrewManifest {
+    /// The model behind the owner-facing Captain interface. Older manifests
+    /// deserialize without it and can be commissioned through the Bridge.
+    #[serde(default)]
+    pub command_model: Option<ModelAssignment>,
     pub leaders: Vec<TeamLeader>,
 }
 
@@ -134,6 +196,15 @@ impl CrewManifest {
         leader.model = model;
         Ok(())
     }
+
+    pub fn assign_command_model(&mut self, model: ModelAssignment) -> Result<(), AssignModelError> {
+        if model.provider.trim().is_empty() || model.model.trim().is_empty() {
+            return Err(AssignModelError::InvalidModel);
+        }
+
+        self.command_model = Some(model);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,6 +241,7 @@ pub fn example_manifest() -> CrewManifest {
     };
 
     CrewManifest {
+        command_model: Some(ModelAssignment::new("provider-a", "command-model")),
         leaders: vec![
             leader(
                 "riker",
@@ -264,5 +336,44 @@ mod tests {
                 .label(),
             "local / engineering-specialist"
         );
+    }
+
+    #[test]
+    fn command_model_is_independent_from_department_models() {
+        let mut manifest = example_manifest();
+        let engineering_before = manifest
+            .leader(&CrewId::new("la-forge"))
+            .unwrap()
+            .model
+            .clone();
+
+        manifest
+            .assign_command_model(ModelAssignment::new("local", "captain-model"))
+            .unwrap();
+
+        assert_eq!(
+            manifest.command_model.as_ref().unwrap().label(),
+            "local / captain-model"
+        );
+        assert_eq!(
+            manifest.leader(&CrewId::new("la-forge")).unwrap().model,
+            engineering_before
+        );
+    }
+
+    #[test]
+    fn project_connections_are_adapter_owned_and_secret_free() {
+        let connection = ProjectConnection {
+            adapter: "github".into(),
+            display_name: "Example Private Project".into(),
+            repository: "https://github.com/example/private-project".into(),
+            workspace_path: Some(r"C:\src\private-project".into()),
+            default_branch: "main".into(),
+        };
+
+        assert_eq!(connection.validate(), Ok(()));
+        let json = serde_json::to_string(&connection).unwrap();
+        assert!(!json.contains("token"));
+        assert!(!json.contains("credential"));
     }
 }

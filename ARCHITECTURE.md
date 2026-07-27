@@ -12,7 +12,7 @@ The application is a native Rust Cargo workspace:
 
 - `ncc-core` owns stable domain contracts and has no UI or provider SDK;
 - `ncc-orchestrator` owns asynchronous coordination and bounded queues;
-- `ncc-bridge` is a Tauri shell with a Three.js LCARS interface;
+- `ncc-bridge` is a Tauri shell with a 2D LCARS meeting interface;
 - future provider, tool, and persistence adapters sit behind core traits.
 
 The UI thread never performs model, network, tool, filesystem, process, or
@@ -20,14 +20,14 @@ database I/O. It dispatches small commands and consumes immutable events.
 Bounded Tokio channels provide explicit backpressure between producers and
 consumers.
 
-The bridge uses an original LCARS-style visual system rendered with Three.js,
-HTML, and CSS inside the operating system webview. Colour, rails, 3D spaces,
-status blocks, and motion communicate live orchestration state; they are not
-merely decorative theming.
+The bridge uses an original LCARS-style visual system rendered with semantic
+HTML and CSS inside the operating system webview. Colour, rails, officer
+stations, status blocks, and restrained motion communicate live orchestration
+state; they are not merely decorative theming.
 
-Three.js scene state is an expendable in-memory projection optimised for smooth
-rendering. It can always be reconstructed from Warp Core read models and must
-never be the only copy of owner work.
+Interface state is an expendable in-memory projection. It can always be
+reconstructed from Warp Core read models and must never be the only copy of
+owner work.
 
 The native Rust process owns all external I/O, secrets, persistence, tools, and
 agent execution. Tauri commands carry bounded owner requests. Tauri channels
@@ -35,10 +35,10 @@ will carry high-rate streaming output to the interface. A future Rust-to-WASM
 protocol module may own deterministic client-side state transforms, but it will
 not hold credentials or replace the native I/O boundary.
 
-Audit reviews are structured records first and 3D walkthroughs second. A
-briefing-room scene may navigate findings, illuminate the responsible
-department, and display debate, but every statement must remain traceable to
-its source evidence and remediation owner.
+Audit reviews are structured records first and visual briefings second. The
+meeting view may navigate findings, illuminate the responsible department, and
+display debate, but every statement must remain traceable to its source evidence
+and remediation owner.
 
 ## Model assignment
 
@@ -53,19 +53,49 @@ Changing one leader's assignment does not alter another leader. Credentials are
 never part of this assignment and will be resolved through a separate secret
 store.
 
+Commissioning starts with a separate command model behind the Captain
+interface. The owner connects a project, assigns that command model, and gives
+it a staffing brief. It may inspect the generic project context and recommend
+provider, model, tool, and focus assignments for each department. Those
+recommendations remain proposals until the owner approves them; a command model
+cannot silently grant credentials or expand agent authority.
+
+## Project adapter boundary
+
+The harness never imports an application's source code or database schema.
+Instead, the Warp Core stores a small, generic `ProjectConnection` containing:
+
+- a project adapter identifier;
+- display name and repository locator;
+- optional local checkout path;
+- default branch.
+
+The connection contains no token. Git and provider credentials are resolved by
+native adapters outside the webview. A public `github` or `local-git` adapter
+can serve ordinary repositories, while a private project may supply an external
+adapter without modifying or forking the harness.
+
+Project adapters translate between this stable contract and a repository's
+actual issue tracker, commands, tests, documents, and deployment systems. The
+crew and UI depend only on the contract. A private codebase is therefore a
+project connected at runtime, not a dependency, built-in mode, or special case
+in NCC-1701-H.
+
 ## Command flow
 
-1. The owner gives an objective to the Captain.
-2. The Captain establishes intent, constraints, and the required authority.
-3. The First Officer decomposes the objective into missions.
-4. The First Officer activates the relevant department heads.
-5. Department heads create bounded specialist assignments.
-6. Specialists return evidence and artefacts to their department heads.
-7. Department heads review their work and submit independent assessments.
-8. For consequential decisions, the First Officer convenes a senior staff review.
-9. The Captain presents the recommendation, disagreements, risks, and approvals
+1. The owner connects a project through a generic adapter.
+2. The owner connects the command model and approves a proposed crew configuration.
+3. The owner gives an objective to the Captain.
+4. The Captain establishes intent, constraints, and the required authority.
+5. The First Officer decomposes the objective into missions.
+6. The First Officer activates the relevant department heads.
+7. Department heads create bounded specialist assignments.
+8. Specialists return evidence and artefacts to their department heads.
+9. Department heads review their work and submit independent assessments.
+10. For consequential decisions, the First Officer convenes a senior staff review.
+11. The Captain presents the recommendation, disagreements, risks, and approvals
    required to the owner.
-10. The final decision and outcome enter the captain's log.
+12. The final decision and outcome enter the captain's log.
 
 ## Agent layers
 

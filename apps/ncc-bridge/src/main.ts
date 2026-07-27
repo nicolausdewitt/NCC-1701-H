@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import * as THREE from "three";
 import "./styles.css";
 
 type ModelAssignment = {
@@ -17,6 +16,7 @@ type TeamLeader = {
 };
 
 type CrewManifest = {
+  command_model: ModelAssignment | null;
   leaders: TeamLeader[];
 };
 
@@ -29,123 +29,109 @@ type WarpCoreStatus = {
   dirty_documents: number;
 };
 
-const canvas = document.querySelector<HTMLCanvasElement>("#viewport");
-if (!canvas) throw new Error("3D viewport is missing");
+type SavedCommand = {
+  command_id: string;
+};
 
-const renderer = new THREE.WebGLRenderer({
-  canvas,
-  antialias: true,
-  powerPreference: "high-performance",
-});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+type ProjectConnection = {
+  adapter: string;
+  display_name: string;
+  repository: string;
+  workspace_path: string | null;
+  default_branch: string;
+};
 
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x03050a);
-scene.fog = new THREE.FogExp2(0x03050a, 0.025);
+type Scene = "bridge" | "plan" | "engineering" | "crew";
 
-const camera = new THREE.PerspectiveCamera(
-  48,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  200,
-);
-camera.position.set(0, 5.5, 18);
+const isNative = "__TAURI_INTERNALS__" in window;
+let activeCrew: CrewManifest = {
+  command_model: {
+    provider: "provider-a",
+    model: "command-model",
+    endpoint: null,
+  },
+  leaders: [
+    leader("riker", "William Riker", "Agent Operations Director", "Command", "provider-a", "orchestration-model"),
+    leader("data", "Data", "Principal Analyst", "Research & Analysis", "provider-b", "reasoning-model"),
+    leader("la-forge", "Geordi La Forge", "Principal Software Engineer", "Engineering", "provider-c", "coding-model"),
+    leader("worf", "Worf", "Security & Risk Director", "Security", "provider-b", "security-model"),
+    leader("troi", "Deanna Troi", "Organisational Psychologist", "People & Users", "provider-a", "human-context-model"),
+    leader("crusher", "Beverly Crusher", "Quality & Safety Director", "Quality", "provider-b", "diagnostic-model"),
+  ],
+};
 
-scene.add(new THREE.HemisphereLight(0x9aa8ff, 0x100812, 1.8));
-const keyLight = new THREE.PointLight(0xffa95c, 90, 34);
-keyLight.position.set(0, 8, 3);
-scene.add(keyLight);
+function leader(
+  id: string,
+  displayName: string,
+  professionalRole: string,
+  department: string,
+  provider: string,
+  model: string,
+): TeamLeader {
+  return {
+    id,
+    display_name: displayName,
+    professional_role: professionalRole,
+    department,
+    model: { provider, model, endpoint: null },
+  };
+}
 
-const room = new THREE.Group();
-scene.add(room);
+function setText(selector: string, text: string) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = text;
+}
 
-const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(13, 64),
-  new THREE.MeshStandardMaterial({
-    color: 0x111725,
-    metalness: 0.55,
-    roughness: 0.45,
-  }),
-);
-floor.rotation.x = -Math.PI / 2;
-room.add(floor);
-
-const table = new THREE.Mesh(
-  new THREE.CapsuleGeometry(3.6, 4.5, 10, 28),
-  new THREE.MeshStandardMaterial({
-    color: 0x2c3344,
-    metalness: 0.75,
-    roughness: 0.28,
-  }),
-);
-table.scale.set(1.4, 0.3, 0.72);
-table.rotation.z = Math.PI / 2;
-table.position.y = 1.25;
-room.add(table);
-
-const tableLight = new THREE.Mesh(
-  new THREE.TorusGeometry(3.2, 0.055, 12, 64),
-  new THREE.MeshBasicMaterial({ color: 0xf6be4b }),
-);
-tableLight.rotation.x = Math.PI / 2;
-tableLight.scale.y = 0.62;
-tableLight.position.y = 1.75;
-room.add(tableLight);
-
-const stationColours = [0xf58b7a, 0xf6be4b, 0xc39ee7, 0x6f97dd, 0xdc4e4e, 0x69d09b];
-const stations: THREE.Mesh[] = [];
-
-for (let index = 0; index < 6; index += 1) {
-  const angle = (index / 6) * Math.PI * 2;
-  const station = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5, 0.68, 1.2, 20),
-    new THREE.MeshStandardMaterial({
-      color: 0x171d2b,
-      emissive: stationColours[index],
-      emissiveIntensity: 0.18,
-      metalness: 0.4,
-      roughness: 0.35,
-    }),
+function setScene(name: Scene) {
+  const isPlanMode = name === "plan";
+  const isEngineering = name === "engineering";
+  const isCrew = name === "crew";
+  document.body.dataset.scene = name;
+  setText(
+    "#scene-code",
+    isPlanMode
+      ? "CONFERENCE / 02"
+      : isEngineering
+        ? "ENGINEERING / 03"
+        : isCrew
+          ? "CREW / 04"
+          : "BRIDGE / 01",
   );
-  station.position.set(Math.sin(angle) * 6.4, 0.65, Math.cos(angle) * 4.8);
-  station.lookAt(0, 0.8, 0);
-  station.userData.baseIntensity = 0.18;
-  stations.push(station);
-  room.add(station);
-}
-
-const starGeometry = new THREE.BufferGeometry();
-const starPositions = new Float32Array(1600 * 3);
-for (let index = 0; index < starPositions.length; index += 1) {
-  starPositions[index] = THREE.MathUtils.randFloatSpread(120);
-}
-starGeometry.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
-scene.add(
-  new THREE.Points(
-    starGeometry,
-    new THREE.PointsMaterial({ color: 0x9eb5de, size: 0.08, transparent: true, opacity: 0.72 }),
-  ),
-);
-
-const bridgePosition = new THREE.Vector3(0, 5.5, 18);
-const briefingPosition = new THREE.Vector3(9.5, 4.2, 9.5);
-const targetPosition = new THREE.Vector3().copy(bridgePosition);
-let highlightedStation = -1;
-
-function setScene(name: "bridge" | "briefing") {
-  const isBriefing = name === "briefing";
-  targetPosition.copy(isBriefing ? briefingPosition : bridgePosition);
-  document.querySelector("#audit-panel")?.classList.toggle("hidden", !isBriefing);
-  setText("#scene-code", isBriefing ? "BRIEFING / 02" : "BRIDGE / 01");
-  setText("#scene-title", isBriefing ? "Audit Review" : "Senior Staff");
+  setText(
+    "#scene-title",
+    isPlanMode
+      ? "Plan Mode"
+      : isEngineering
+        ? "Bug Resolution"
+        : isCrew
+          ? "Commissioning"
+          : "Senior Staff",
+  );
   setText(
     "#scene-description",
-    isBriefing
-      ? "Walk through evidence, dissent, risk, and remediation."
-      : "Independent models. One accountable command structure.",
+    isPlanMode
+      ? "Convene the right perspectives before committing to a plan."
+      : isEngineering
+        ? "Reproduce, isolate, patch, and verify with a focused technical team."
+        : isCrew
+          ? "Connect a project. Assign the right model to every department."
+          : "Independent models. One accountable command structure.",
   );
+  setText("#table-mode", isEngineering ? "ENGINEERING ROOM" : "PLAN MODE");
+  setText("#table-title", isEngineering ? "BUG RESOLUTION" : "PLANNING SESSION");
+  setText(
+    "#table-subtitle",
+    isEngineering ? "REPRODUCE · ISOLATE · PATCH · VERIFY" : "6 INDEPENDENT PERSPECTIVES",
+  );
+  if (commandInput) {
+    commandInput.placeholder = isPlanMode
+      ? "Give the planning team a problem to work through…"
+      : isEngineering
+        ? "Describe the bug, symptoms, and expected behaviour…"
+        : isCrew
+          ? "Crew configuration does not dispatch commands."
+          : "Give the senior staff an objective…";
+  }
   document.querySelectorAll<HTMLButtonElement>(".nav[data-scene]").forEach((button) => {
     button.classList.toggle("active", button.dataset.scene === name);
   });
@@ -153,70 +139,331 @@ function setScene(name: "bridge" | "briefing") {
 
 document.querySelectorAll<HTMLButtonElement>("[data-scene]").forEach((button) => {
   button.addEventListener("click", () => {
-    setScene(button.dataset.scene as "bridge" | "briefing");
+    setScene(button.dataset.scene as Scene);
   });
 });
 
-document.querySelector("#next-finding")?.addEventListener("click", () => {
-  highlightedStation = (highlightedStation + 1) % stations.length;
-  targetPosition.set(
-    stations[highlightedStation].position.x * 1.25,
-    3.1,
-    stations[highlightedStation].position.z * 1.25 + 4.5,
-  );
+const commandForm = document.querySelector<HTMLFormElement>("#command-form");
+const commandInput = document.querySelector<HTMLInputElement>("#command-input");
+const commandTranscript = document.querySelector<HTMLElement>("#command-transcript");
+const projectForm = document.querySelector<HTMLFormElement>("#project-form");
+const projectAdapterInput = document.querySelector<HTMLSelectElement>("#project-adapter-input");
+const projectNameInput = document.querySelector<HTMLInputElement>("#project-name-input");
+const projectRepositoryInput = document.querySelector<HTMLInputElement>("#project-repository-input");
+const projectWorkspaceInput = document.querySelector<HTMLInputElement>("#project-workspace-input");
+const projectBranchInput = document.querySelector<HTMLInputElement>("#project-branch-input");
+const commandModelForm = document.querySelector<HTMLFormElement>("#command-model-form");
+const commandProviderInput = document.querySelector<HTMLInputElement>("#command-provider-input");
+const commandModelInput = document.querySelector<HTMLInputElement>("#command-model-input");
+const commandEndpointInput = document.querySelector<HTMLInputElement>("#command-endpoint-input");
+const staffingForm = document.querySelector<HTMLFormElement>("#staffing-form");
+const staffingPrompt = document.querySelector<HTMLTextAreaElement>("#staffing-prompt");
+
+commandForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = commandInput?.value.trim() ?? "";
+  if (!message || !commandInput || !commandTranscript) return;
+
+  commandInput.disabled = true;
+  const submitButton = commandForm.querySelector<HTMLButtonElement>("button");
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    if (isNative) {
+      await invoke<SavedCommand>("submit_captain_message", {
+        messageId: crypto.randomUUID(),
+        text: message,
+      });
+      commandTranscript.innerHTML = `<b>PICARD</b><span>${escapeHtml(message)}</span>`;
+      setText("#system-status", "COMMAND SAVED · AWAITING FIRST OFFICER");
+    } else {
+      commandTranscript.innerHTML =
+        `<b>PREVIEW</b><span>${escapeHtml(message)} · Native Warp Core required to dispatch.</span>`;
+    }
+    commandInput.value = "";
+  } catch (error) {
+    setText("#system-status", `COMMAND REJECTED · ${String(error)}`);
+  } finally {
+    commandInput.disabled = false;
+    if (submitButton) submitButton.disabled = false;
+    commandInput.focus();
+  }
 });
 
-function setText(selector: string, text: string) {
-  const element = document.querySelector(selector);
-  if (element) element.textContent = text;
+projectForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (
+    !projectAdapterInput ||
+    !projectNameInput ||
+    !projectRepositoryInput ||
+    !projectWorkspaceInput ||
+    !projectBranchInput
+  ) {
+    return;
+  }
+
+  const connection: ProjectConnection = {
+    adapter: projectAdapterInput.value,
+    display_name: projectNameInput.value.trim(),
+    repository: projectRepositoryInput.value.trim(),
+    workspace_path: projectWorkspaceInput.value.trim() || null,
+    default_branch: projectBranchInput.value.trim(),
+  };
+  const submitButton = projectForm.querySelector<HTMLButtonElement>("button[type='submit']");
+  if (submitButton) submitButton.disabled = true;
+
+  try {
+    const saved = isNative
+      ? await invoke<ProjectConnection>("connect_project", { connection })
+      : connection;
+    renderProjectConnection(saved);
+    setText(
+      "#system-status",
+      isNative
+        ? "PROJECT COMMISSIONED · SAVED THROUGH WARP CORE"
+        : "VISUAL PREVIEW · PROJECT CONNECTION SIMULATED",
+    );
+  } catch (error) {
+    setText("#system-status", `PROJECT REJECTED · ${String(error)}`);
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
+});
+
+commandModelForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!commandProviderInput || !commandModelInput || !commandEndpointInput) return;
+
+  const model: ModelAssignment = {
+    provider: commandProviderInput.value.trim(),
+    model: commandModelInput.value.trim(),
+    endpoint: commandEndpointInput.value.trim() || null,
+  };
+  const submit = commandModelForm.querySelector<HTMLButtonElement>("button[type='submit']");
+  if (submit) submit.disabled = true;
+
+  try {
+    if (isNative) {
+      activeCrew = await invoke<CrewManifest>("assign_command_model", { model });
+    } else {
+      activeCrew = { ...activeCrew, command_model: model };
+    }
+    renderCommandModel(activeCrew);
+    setText("#system-status", "PICARD · COMMAND MODEL CONNECTED");
+  } catch (error) {
+    setText("#system-status", `COMMAND MODEL REJECTED · ${String(error)}`);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+});
+
+staffingForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const prompt = staffingPrompt?.value.trim() ?? "";
+  if (!prompt || !staffingPrompt) return;
+  if (!activeCrew.command_model) {
+    setText("#system-status", "CONNECT THE COMMAND MODEL BEFORE SUBMITTING A STAFFING BRIEF");
+    commandProviderInput?.focus();
+    return;
+  }
+
+  const submit = staffingForm.querySelector<HTMLButtonElement>("button[type='submit']");
+  if (submit) submit.disabled = true;
+  try {
+    if (isNative) {
+      await invoke<SavedCommand>("submit_staffing_brief", {
+        briefId: crypto.randomUUID(),
+        prompt,
+      });
+    }
+    setText(
+      "#system-status",
+      isNative
+        ? "STAFFING BRIEF SAVED · COMMAND MODEL QUEUED"
+        : "VISUAL PREVIEW · STAFFING BRIEF READY",
+    );
+  } catch (error) {
+    setText("#system-status", `STAFFING BRIEF REJECTED · ${String(error)}`);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+});
+
+function escapeHtml(value: string) {
+  const span = document.createElement("span");
+  span.textContent = value;
+  return span.innerHTML;
 }
 
 async function connectWarpCore() {
-  if (!("__TAURI_INTERNALS__" in window)) {
+  if (!isNative) {
+    renderCrew(activeCrew);
     setText("#system-status", "VISUAL PREVIEW · WARP CORE STANDBY");
     return;
   }
 
   try {
-    const [crew, status] = await Promise.all([
+    const [crew, status, project] = await Promise.all([
       invoke<CrewManifest>("get_crew_manifest"),
       invoke<WarpCoreStatus>("get_warp_core_status"),
+      invoke<ProjectConnection | null>("get_project_connection"),
     ]);
+    activeCrew = crew;
     setText(
       "#system-status",
       `WARP CORE ONLINE · ${crew.leaders.length} OFFICERS · ${status.queued + status.retry} TO BASE`,
     );
+    setText("#metric-core", "ONLINE");
+    setText("#metric-officers", String(crew.leaders.length).padStart(2, "0"));
+    setText("#metric-queue", String(status.queued + status.retry).padStart(2, "0"));
+    renderCrew(crew);
+    if (project) renderProjectConnection(project);
   } catch (error) {
     setText("#system-status", `WARP CORE OFFLINE · ${String(error)}`);
   }
 }
 
-const animationStartedAt = Date.now();
-function animate() {
-  const elapsed = (Date.now() - animationStartedAt) / 1000;
-  camera.position.lerp(targetPosition, 0.035);
-  camera.lookAt(0, 1.1, 0);
-  tableLight.rotation.z = elapsed * 0.035;
-
-  stations.forEach((station, index) => {
-    const material = station.material as THREE.MeshStandardMaterial;
-    const active = index === highlightedStation;
-    material.emissiveIntensity = THREE.MathUtils.lerp(
-      material.emissiveIntensity,
-      active ? 1.8 + Math.sin(elapsed * 4) * 0.25 : station.userData.baseIntensity,
-      0.08,
-    );
-  });
-
-  renderer.render(scene, camera);
-  requestAnimationFrame(animate);
+function renderCrew(crew: CrewManifest) {
+  renderCommandModel(crew);
+  renderModelAssignments(crew);
+  renderModelSettings(crew);
 }
 
-window.addEventListener("resize", () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+function renderCommandModel(crew: CrewManifest) {
+  if (!crew.command_model) return;
+  if (commandProviderInput) commandProviderInput.value = crew.command_model.provider;
+  if (commandModelInput) commandModelInput.value = crew.command_model.model;
+  if (commandEndpointInput) commandEndpointInput.value = crew.command_model.endpoint ?? "";
+}
+
+function renderModelAssignments(crew: CrewManifest) {
+  const list = document.querySelector<HTMLElement>("#crew-models");
+  if (!list) return;
+  list.replaceChildren(
+    ...crew.leaders.slice(0, 6).map((leader) => {
+      const row = document.createElement("div");
+      const dot = document.createElement("i");
+      dot.className = `dot ${departmentDotClass(leader.department)}`;
+      const name = document.createElement("strong");
+      name.textContent = leader.display_name.split(" ").at(-1) ?? leader.display_name;
+      const model = document.createElement("span");
+      model.textContent = leader.model.model;
+      row.append(dot, name, model);
+      return row;
+    }),
+  );
+}
+
+function renderModelSettings(crew: CrewManifest) {
+  const settings = document.querySelector<HTMLElement>("#model-settings");
+  if (!settings) return;
+
+  settings.replaceChildren(
+    ...crew.leaders.map((crewLeader) => {
+      const form = document.createElement("form");
+      form.className = "model-card";
+      form.dataset.leaderId = crewLeader.id;
+
+      const heading = document.createElement("div");
+      heading.className = "model-card-heading";
+      const dot = document.createElement("i");
+      dot.className = `dot ${departmentDotClass(crewLeader.department)}`;
+      const identity = document.createElement("span");
+      const name = document.createElement("strong");
+      name.textContent = crewLeader.display_name;
+      const role = document.createElement("small");
+      role.textContent = crewLeader.professional_role;
+      identity.append(name, role);
+      heading.append(dot, identity);
+
+      const provider = modelField("PROVIDER", "provider", crewLeader.model.provider);
+      const model = modelField("MODEL", "model", crewLeader.model.model);
+      const save = document.createElement("button");
+      save.type = "submit";
+      save.textContent = "ASSIGN";
+      form.append(heading, provider, model, save);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        void assignModel(form, crewLeader);
+      });
+      return form;
+    }),
+  );
+}
+
+function modelField(labelText: string, name: string, value: string) {
+  const label = document.createElement("label");
+  const caption = document.createElement("span");
+  caption.textContent = labelText;
+  const input = document.createElement("input");
+  input.name = name;
+  input.value = value;
+  input.required = true;
+  label.append(caption, input);
+  return label;
+}
+
+async function assignModel(form: HTMLFormElement, crewLeader: TeamLeader) {
+  const provider = form.elements.namedItem("provider") as HTMLInputElement | null;
+  const model = form.elements.namedItem("model") as HTMLInputElement | null;
+  const submit = form.querySelector<HTMLButtonElement>("button[type='submit']");
+  if (!provider?.value.trim() || !model?.value.trim()) return;
+
+  if (submit) submit.disabled = true;
+  try {
+    const assignment: ModelAssignment = {
+      provider: provider.value.trim(),
+      model: model.value.trim(),
+      endpoint: crewLeader.model.endpoint,
+    };
+    if (isNative) {
+      activeCrew = await invoke<CrewManifest>("assign_leader_model", {
+        leaderId: crewLeader.id,
+        model: assignment,
+      });
+    } else {
+      activeCrew = {
+        ...activeCrew,
+        leaders: activeCrew.leaders.map((leaderEntry) =>
+          leaderEntry.id === crewLeader.id
+            ? { ...leaderEntry, model: assignment }
+            : leaderEntry,
+        ),
+      };
+    }
+    renderCrew(activeCrew);
+    setText(
+      "#system-status",
+      `${crewLeader.display_name.toUpperCase()} · MODEL ASSIGNMENT SAVED`,
+    );
+  } catch (error) {
+    setText("#system-status", `MODEL ASSIGNMENT REJECTED · ${String(error)}`);
+    if (submit) submit.disabled = false;
+  }
+}
+
+function renderProjectConnection(connection: ProjectConnection) {
+  setText("#project-adapter", connection.adapter.toUpperCase());
+  setText("#project-name", connection.display_name.toUpperCase());
+  setText(
+    "#project-summary",
+    `${connection.repository} · ${connection.default_branch}`,
+  );
+
+  if (projectAdapterInput) projectAdapterInput.value = connection.adapter;
+  if (projectNameInput) projectNameInput.value = connection.display_name;
+  if (projectRepositoryInput) projectRepositoryInput.value = connection.repository;
+  if (projectWorkspaceInput) projectWorkspaceInput.value = connection.workspace_path ?? "";
+  if (projectBranchInput) projectBranchInput.value = connection.default_branch;
+}
+
+function departmentDotClass(department: string) {
+  if (department === "Command") return "command-dot";
+  if (department === "Engineering") return "engineering-dot";
+  if (department === "Security") return "security-dot";
+  if (department === "Research & Analysis") return "science-dot";
+  if (department === "Quality") return "medical-dot";
+  return "people-dot";
+}
 
 void connectWarpCore();
-animate();

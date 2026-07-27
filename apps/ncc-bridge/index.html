@@ -6,8 +6,7 @@
     <meta name="theme-color" content="#05070d" />
     <title>NCC-1701-H</title>
   </head>
-  <body>
-    <canvas id="viewport" aria-label="Three-dimensional briefing room"></canvas>
+  <body data-scene="bridge">
     <div id="lcars">
       <header class="top-rail">
         <div class="elbow salmon"><span>47</span></div>
@@ -22,9 +21,9 @@
 
       <aside class="command-rail">
         <button class="nav salmon active" data-scene="bridge"><b>01</b> BRIDGE</button>
-        <button class="nav amber" data-scene="briefing"><b>02</b> BRIEFING</button>
-        <button class="nav lavender"><b>03</b> CREW</button>
-        <button class="nav blue"><b>04</b> SYSTEMS</button>
+        <button class="nav amber" data-scene="plan"><b>02</b> CONFERENCE</button>
+        <button class="nav lavender" data-scene="engineering"><b>03</b> ENGINEERING</button>
+        <button class="nav blue" data-scene="crew"><b>04</b> CREW</button>
         <section class="captain-card">
           <small>CAPTAIN</small>
           <strong>JEAN-LUC PICARD</strong>
@@ -39,22 +38,201 @@
           <p id="scene-description">Independent models. One accountable command structure.</p>
         </section>
 
-        <section id="audit-panel" class="audit-panel hidden">
-          <div class="eyebrow">AUDIT REVIEW 001</div>
-          <h2>Briefing-room walkthrough</h2>
-          <p>
-            Findings remain evidence-backed records. The room visualises who
-            raised them, who disagrees, and who owns remediation.
-          </p>
-          <div class="finding">
-            <span class="severity high">HIGH</span>
-            <div>
-              <strong>Credential boundary review</strong>
-              <small>Security assessment · Worf</small>
+        <section class="bridge-data" aria-label="Bridge operations">
+          <div class="metric-row">
+            <article class="metric">
+              <small>WARP CORE</small>
+              <strong id="metric-core">STANDBY</strong>
+              <span>LOCAL DATA ENGINE</span>
+            </article>
+            <article class="metric">
+              <small>SENIOR STAFF</small>
+              <strong id="metric-officers">06</strong>
+              <span>DEPARTMENTS READY</span>
+            </article>
+            <article class="metric">
+              <small>TO BASE</small>
+              <strong id="metric-queue">00</strong>
+              <span>PENDING TRANSMISSIONS</span>
+            </article>
+          </div>
+
+          <div class="data-grid">
+            <article class="data-panel mission-panel">
+              <header><span>ACTIVE PROJECT</span><b id="project-adapter">NOT CONNECTED</b></header>
+              <div class="empty-mission">
+                <small>MISSION HARNESS</small>
+                <strong id="project-name">NO PROJECT COMMISSIONED</strong>
+                <p id="project-summary">Connect any Git project, then give the crew an objective.</p>
+              </div>
+              <div class="panel-actions">
+                <button class="panel-action" data-scene="plan">CONVENE PLAN MODE</button>
+                <button class="panel-action secondary" data-scene="crew">COMMISSION PROJECT</button>
+              </div>
+            </article>
+
+            <article class="data-panel">
+              <header><span>MODEL ASSIGNMENTS</span><b>LIVE</b></header>
+              <div id="crew-models" class="model-list">
+                <div><i class="dot command-dot"></i><strong>RIKER</strong><span>orchestration-model</span></div>
+                <div><i class="dot science-dot"></i><strong>DATA</strong><span>reasoning-model</span></div>
+                <div><i class="dot engineering-dot"></i><strong>GEORDI</strong><span>coding-model</span></div>
+                <div><i class="dot security-dot"></i><strong>WORF</strong><span>security-model</span></div>
+              </div>
+            </article>
+
+            <article class="data-panel activity-panel">
+              <header><span>SHIP ACTIVITY</span><b>LOCAL</b></header>
+              <ol>
+                <li><time>NOW</time><span>Bridge interface online</span></li>
+                <li><time>—</time><span>Awaiting captain's objective</span></li>
+                <li><time>—</time><span>No unresolved review findings</span></li>
+              </ol>
+            </article>
+          </div>
+        </section>
+
+        <section class="meeting-room" aria-label="Senior staff planning room">
+          <article class="officer officer-riker command">
+            <span class="portrait" aria-hidden="true"><i></i></span>
+            <span class="officer-copy"><strong>RIKER</strong><small>OPERATIONS</small></span>
+          </article>
+          <article class="officer officer-data science">
+            <span class="portrait" aria-hidden="true"><i></i></span>
+            <span class="officer-copy"><strong>DATA</strong><small>ANALYSIS</small></span>
+          </article>
+          <article class="officer officer-geordi engineering">
+            <span class="portrait" aria-hidden="true"><i></i></span>
+            <span class="officer-copy"><strong>GEORDI</strong><small>ENGINEERING</small></span>
+          </article>
+          <article class="officer officer-crusher medical">
+            <span class="portrait" aria-hidden="true"><i></i></span>
+            <span class="officer-copy"><strong>CRUSHER</strong><small>QUALITY</small></span>
+          </article>
+          <article class="officer officer-troi people">
+            <span class="portrait" aria-hidden="true"><i></i></span>
+            <span class="officer-copy"><strong>TROI</strong><small>PEOPLE</small></span>
+          </article>
+          <article class="officer officer-worf security">
+            <span class="portrait" aria-hidden="true"><i></i></span>
+            <span class="officer-copy"><strong>WORF</strong><small>SECURITY</small></span>
+          </article>
+
+          <div class="conference-table">
+            <div class="table-readout">
+              <small id="table-mode">PLAN MODE</small>
+              <strong id="table-title">PLANNING SESSION</strong>
+              <span id="table-subtitle">6 INDEPENDENT PERSPECTIVES</span>
+              <button class="table-exit" data-scene="bridge">RETURN TO BRIDGE</button>
             </div>
           </div>
-          <button id="next-finding" class="action">BEGIN WALKTHROUGH</button>
         </section>
+
+        <section class="commissioning" aria-label="Project and crew commissioning">
+          <div class="commissioning-sequence">
+            <article class="settings-panel project-settings">
+              <header>
+                <span>01 / CONNECT GIT</span>
+                <b>PROJECT ADAPTER</b>
+              </header>
+              <form id="project-form" class="project-form">
+                <label>
+                  <span>ADAPTER</span>
+                  <select id="project-adapter-input" name="adapter">
+                    <option value="github">GitHub</option>
+                    <option value="local-git">Local Git</option>
+                    <option value="external">External adapter</option>
+                  </select>
+                </label>
+                <label>
+                  <span>DISPLAY NAME</span>
+                  <input id="project-name-input" name="displayName" required placeholder="My project" />
+                </label>
+                <label class="wide">
+                  <span>REPOSITORY</span>
+                  <input
+                    id="project-repository-input"
+                    name="repository"
+                    required
+                    placeholder="https://github.com/owner/repository"
+                  />
+                </label>
+                <label>
+                  <span>LOCAL CHECKOUT <small>OPTIONAL</small></span>
+                  <input
+                    id="project-workspace-input"
+                    name="workspacePath"
+                    placeholder="C:\src\project"
+                  />
+                </label>
+                <label>
+                  <span>DEFAULT BRANCH</span>
+                  <input id="project-branch-input" name="defaultBranch" value="main" required />
+                </label>
+                <button type="submit">CONNECT PROJECT</button>
+              </form>
+              <p class="settings-note">Git credentials stay with the adapter, never the webview.</p>
+            </article>
+
+            <article class="settings-panel command-model-settings">
+              <header>
+                <span>02 / CONNECT COMMAND MODEL</span>
+                <b>PICARD</b>
+              </header>
+              <form id="command-model-form" class="command-model-form">
+                <label>
+                  <span>PROVIDER</span>
+                  <input id="command-provider-input" name="provider" required placeholder="openai" />
+                </label>
+                <label>
+                  <span>MODEL</span>
+                  <input id="command-model-input" name="model" required placeholder="command model" />
+                </label>
+                <label class="wide">
+                  <span>ENDPOINT <small>OPTIONAL</small></span>
+                  <input id="command-endpoint-input" name="endpoint" placeholder="Provider default" />
+                </label>
+                <button type="submit">CONNECT MODEL</button>
+              </form>
+              <form id="staffing-form" class="staffing-form">
+                <label>
+                  <span>STAFFING BRIEF</span>
+                  <textarea
+                    id="staffing-prompt"
+                    required
+                    placeholder="Read this project and propose the right models, tools, and focus for each department…"
+                  ></textarea>
+                </label>
+                <button type="submit">ASK PICARD TO STAFF THE SHIP</button>
+              </form>
+            </article>
+          </div>
+
+          <article class="settings-panel model-settings">
+            <header>
+              <span>03 / REVIEW CREW</span>
+              <b>OWNER APPROVAL</b>
+            </header>
+            <div id="model-settings" class="model-settings-grid"></div>
+          </article>
+        </section>
+
+        <section id="command-transcript" class="command-transcript" aria-live="polite">
+          <b>PICARD</b>
+          <span>Senior staff standing by.</span>
+        </section>
+
+        <form id="command-form" class="command-chat">
+          <label for="command-input">CAPTAIN'S CHANNEL</label>
+          <input
+            id="command-input"
+            name="command"
+            type="text"
+            autocomplete="off"
+            placeholder="Give the senior staff an objective…"
+          />
+          <button type="submit">ENGAGE</button>
+        </form>
       </main>
 
       <footer class="status-rail">
@@ -68,4 +246,3 @@
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-

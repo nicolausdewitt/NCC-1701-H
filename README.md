@@ -46,11 +46,11 @@ a native binary and renders the bridge with the operating system webview;
 Tokio runs model, tool, process, filesystem, and persistence I/O away from the
 render thread.
 
-The owner interacts through an original LCARS-style Three.js bridge. Its visual
-language is functional: department colours, command rails, status bands, 3D
-spaces, and live activity indicators expose how the agent organisation is
-operating. Audit reviews can become briefing-room walkthroughs while retaining
-structured evidence beneath every visual element.
+The owner interacts through an original LCARS-style bridge. Its functional 2D
+meeting-room view uses department colours, officer stations, command rails,
+status bands, and live activity indicators to expose how the agent organisation
+is operating. Audit reviews can become structured senior-staff briefings while
+retaining evidence beneath every visual element.
 
 The interface may use game-design techniques, but game memory is only a fast,
 disposable projection. Every meaningful UI action is committed immediately
@@ -63,11 +63,29 @@ The Cargo workspace separates:
 
 - `ncc-core`: provider-independent crew, mission, and model contracts;
 - `ncc-orchestrator`: bounded asynchronous command and event flows;
-- `ncc-bridge`: the Tauri shell and Three.js desktop interface.
+- `ncc-bridge`: the Tauri shell and LCARS desktop interface.
 
 Each team leader has an independent provider and model assignment. This allows,
 for example, Engineering and Research to use different models without coupling
 the professional role to a particular vendor.
+
+## Commissioning a project
+
+The public harness follows a three-step commissioning flow:
+
+1. connect any GitHub, local Git, or external project adapter;
+2. connect the command model behind the Captain interface;
+3. give that model a staffing brief and approve its proposed assignments for
+   the department heads.
+
+The project record contains a repository locator and optional local checkout,
+not a token. Git and model credentials remain in native adapters and secret
+stores. A private codebase is therefore connected at runtime rather than copied
+into, referenced by, or compiled with NCC-1701-H.
+
+A private codebase is just one mission target and receives no special case in
+the public code, so another developer can point the same ship at their own
+repository and enjoy the same framework.
 
 The initial work will define:
 
@@ -97,8 +115,8 @@ pnpm tauri build
 
 ## Independence
 
-NCC-1701-H is a standalone project. It contains no Farrier source code, database
-content, credentials, configuration, or other private project material.
+NCC-1701-H is a standalone project. It contains no connected-project source
+code, database content, credentials, configuration, or other private material.
 
 ## Disclaimer
 
