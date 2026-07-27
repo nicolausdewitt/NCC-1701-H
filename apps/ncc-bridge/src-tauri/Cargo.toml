@@ -1,0 +1,20 @@
+[package]
+name = "ncc-bridge"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+name = "ncc_bridge_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+ncc-core.workspace = true
+ncc-warpcore = { path = "../../../crates/ncc-warpcore" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.11.5", features = [] }
+tokio.workspace = true

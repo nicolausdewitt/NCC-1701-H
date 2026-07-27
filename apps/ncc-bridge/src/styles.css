@@ -1,0 +1,184 @@
+:root {
+  font-family: "Segoe UI", "Arial Narrow", sans-serif;
+  color: #ebedf1;
+  background: #05070d;
+  font-synthesis: none;
+  --space: #05070d;
+  --panel: rgba(18, 23, 35, 0.88);
+  --ink: #17131c;
+  --salmon: #f58b7a;
+  --amber: #f6be4b;
+  --lavender: #c39ee7;
+  --blue: #6f97dd;
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+button { font: inherit; }
+
+#viewport {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#lcars {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template:
+    "header header" 104px
+    "side main" 1fr
+    "footer footer" 44px / 236px 1fr;
+  padding: 12px;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.top-rail, .status-rail {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.top-rail { grid-area: header; }
+.status-rail { grid-area: footer; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+
+.elbow {
+  align-self: stretch;
+  width: 74px;
+  border-radius: 32px 0 0 0;
+  color: var(--ink);
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  padding: 12px;
+  font-weight: 900;
+}
+
+.rail-block {
+  min-width: 88px;
+  padding: 10px 16px;
+  color: var(--ink);
+  text-align: center;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.top-rail .rail-block:last-child, .status-rail .rail-block:last-child {
+  border-radius: 0 22px 22px 0;
+}
+
+.rail-fill { height: 10px; flex: 1; }
+.salmon { background: var(--salmon); }
+.amber { background: var(--amber); }
+.lavender { background: var(--lavender); }
+.blue { background: var(--blue); }
+
+.title {
+  display: flex;
+  flex-direction: column;
+  min-width: 350px;
+  padding: 0 12px;
+}
+.title strong { color: var(--amber); font-size: 32px; letter-spacing: .03em; }
+.title span { color: var(--lavender); font-size: 11px; font-weight: 800; letter-spacing: .12em; }
+
+.command-rail {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  pointer-events: auto;
+}
+
+.nav {
+  border: 0;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 22px 0 0 22px;
+  color: var(--ink);
+  text-align: right;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .07em;
+  cursor: pointer;
+  opacity: .82;
+}
+.nav b { float: left; }
+.nav:hover, .nav.active { opacity: 1; filter: brightness(1.12); }
+
+.captain-card, .audit-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(195, 158, 231, .42);
+  border-radius: 12px;
+  background: var(--panel);
+  backdrop-filter: blur(12px);
+}
+.captain-card { display: flex; flex-direction: column; gap: 5px; }
+.captain-card small, .eyebrow { color: var(--salmon); font-weight: 900; letter-spacing: .12em; }
+.captain-card span { color: #9aa4b8; font-size: 10px; letter-spacing: .08em; }
+
+.readout {
+  grid-area: main;
+  position: relative;
+  pointer-events: auto;
+}
+
+.scene-heading {
+  position: absolute;
+  top: 5%;
+  right: 3%;
+  max-width: 460px;
+  text-align: right;
+  text-shadow: 0 2px 12px #000;
+}
+.scene-heading span { color: var(--salmon); font-size: 11px; font-weight: 900; letter-spacing: .14em; }
+.scene-heading h1 { margin: 4px 0; color: var(--amber); font-size: clamp(34px, 5vw, 72px); text-transform: uppercase; }
+.scene-heading p { margin: 0; color: #d1d6e0; }
+
+.audit-panel {
+  position: absolute;
+  right: 3%;
+  bottom: 6%;
+  width: min(420px, 44vw);
+  transition: opacity .35s, transform .35s;
+}
+.audit-panel.hidden { opacity: 0; transform: translateY(20px); pointer-events: none; }
+.audit-panel h2 { margin: 6px 0; color: var(--amber); }
+.audit-panel p { color: #b5becf; line-height: 1.5; }
+
+.finding {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid #3a4358;
+}
+.finding div { display: flex; flex-direction: column; gap: 3px; }
+.finding small { color: #9aa4b8; }
+.severity { padding: 7px 9px; border-radius: 14px; font-size: 10px; font-weight: 900; }
+.severity.high { background: #dc4e4e; }
+
+.action {
+  width: 100%;
+  border: 0;
+  border-radius: 18px;
+  padding: 11px 16px;
+  background: var(--amber);
+  color: var(--ink);
+  font-weight: 900;
+  cursor: pointer;
+}
+.action:hover { filter: brightness(1.12); }
+
+@media (max-width: 820px) {
+  #lcars { grid-template-columns: 160px 1fr; }
+  .title { min-width: 210px; }
+  .title strong { font-size: 24px; }
+  .command-rail { width: 160px; }
+  .audit-panel { width: min(390px, 60vw); }
+}
+

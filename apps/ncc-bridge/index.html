@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#05070d" />
+    <title>NCC-1701-H</title>
+  </head>
+  <body>
+    <canvas id="viewport" aria-label="Three-dimensional briefing room"></canvas>
+    <div id="lcars">
+      <header class="top-rail">
+        <div class="elbow salmon"><span>47</span></div>
+        <div class="rail-block amber">NCC</div>
+        <div class="title">
+          <strong>NCC-1701-H</strong>
+          <span>AGENT COMMAND HARNESS / BRIDGE</span>
+        </div>
+        <div class="rail-fill lavender"></div>
+        <div class="rail-block blue">OPS 1701</div>
+      </header>
+
+      <aside class="command-rail">
+        <button class="nav salmon active" data-scene="bridge"><b>01</b> BRIDGE</button>
+        <button class="nav amber" data-scene="briefing"><b>02</b> BRIEFING</button>
+        <button class="nav lavender"><b>03</b> CREW</button>
+        <button class="nav blue"><b>04</b> SYSTEMS</button>
+        <section class="captain-card">
+          <small>CAPTAIN</small>
+          <strong>JEAN-LUC PICARD</strong>
+          <span>OWNER COMMAND INTERFACE</span>
+        </section>
+      </aside>
+
+      <main class="readout">
+        <section class="scene-heading">
+          <span id="scene-code">BRIDGE / 01</span>
+          <h1 id="scene-title">Senior Staff</h1>
+          <p id="scene-description">Independent models. One accountable command structure.</p>
+        </section>
+
+        <section id="audit-panel" class="audit-panel hidden">
+          <div class="eyebrow">AUDIT REVIEW 001</div>
+          <h2>Briefing-room walkthrough</h2>
+          <p>
+            Findings remain evidence-backed records. The room visualises who
+            raised them, who disagrees, and who owns remediation.
+          </p>
+          <div class="finding">
+            <span class="severity high">HIGH</span>
+            <div>
+              <strong>Credential boundary review</strong>
+              <small>Security assessment · Worf</small>
+            </div>
+          </div>
+          <button id="next-finding" class="action">BEGIN WALKTHROUGH</button>
+        </section>
+      </main>
+
+      <footer class="status-rail">
+        <div class="rail-block lavender">CORE</div>
+        <div class="rail-fill salmon"></div>
+        <span id="system-status">WARP CORE CONNECTING</span>
+        <div class="rail-fill blue"></div>
+        <div class="rail-block amber">2026.208</div>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
+

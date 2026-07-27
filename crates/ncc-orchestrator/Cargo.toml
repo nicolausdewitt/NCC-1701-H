@@ -1,0 +1,9 @@
+[package]
+name = "ncc-orchestrator"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[dependencies]
+ncc-core.workspace = true
+tokio.workspace = true

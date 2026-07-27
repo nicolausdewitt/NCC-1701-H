@@ -1,0 +1,21 @@
+{
+  "name": "ncc-1701-h-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/three": "0.185.0",
+    "typescript": "6.0.3",
+    "vite": "8.1.5"
+  }
+}
