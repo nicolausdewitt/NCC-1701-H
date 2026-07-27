@@ -172,6 +172,11 @@ function setText(selector: string, text: string) {
 }
 
 async function connectWarpCore() {
+  if (!("__TAURI_INTERNALS__" in window)) {
+    setText("#system-status", "VISUAL PREVIEW · WARP CORE STANDBY");
+    return;
+  }
+
   try {
     const [crew, status] = await Promise.all([
       invoke<CrewManifest>("get_crew_manifest"),
@@ -186,9 +191,9 @@ async function connectWarpCore() {
   }
 }
 
-const clock = new THREE.Clock();
+const animationStartedAt = Date.now();
 function animate() {
-  const elapsed = clock.getElapsedTime();
+  const elapsed = (Date.now() - animationStartedAt) / 1000;
   camera.position.lerp(targetPosition, 0.035);
   camera.lookAt(0, 1.1, 0);
   tableLight.rotation.z = elapsed * 0.035;
