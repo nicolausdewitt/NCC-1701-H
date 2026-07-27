@@ -623,6 +623,26 @@ async function connectWarpCore() {
     document.body.dataset.runtime = "preview";
     setText("#walkthrough-mode", "WEB PREVIEW / NO AUTHENTICATION");
     setText("#system-status", "WEB PREVIEW / NO ACCOUNTS OR PROJECTS ARE ACCESSED");
+    setGithubFeedback(
+      "preview",
+      "DESKTOP APP REQUIRED",
+      "OPEN NCC-1701-H TO SIGN IN WITH GITHUB",
+    );
+    if (githubButton) {
+      githubButton.textContent = "GITHUB SIGN-IN REQUIRES DESKTOP";
+      githubButton.disabled = true;
+    }
+    if (githubPreviewNext) githubPreviewNext.hidden = false;
+    setOpenAiFeedback(
+      "preview",
+      "DESKTOP APP REQUIRED",
+      "OPEN NCC-1701-H TO SIGN IN WITH CHATGPT",
+    );
+    if (openAiButton) {
+      openAiButton.textContent = "OPENAI SIGN-IN REQUIRES DESKTOP";
+      openAiButton.disabled = true;
+    }
+    if (openAiPreviewNext) openAiPreviewNext.hidden = false;
     if (onboardingComplete) {
       setupSteps.forEach((step) => previewedSteps.add(step));
       setOnboardingGate(false);
