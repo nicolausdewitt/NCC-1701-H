@@ -11,6 +11,7 @@ const SYSTEM_COLLECTION: &str = "system";
 const CREW_MANIFEST_ID: &str = "crew-manifest";
 const PROJECT_CONNECTION_ID: &str = "active-project";
 const PROVIDER_COLLECTION: &str = "provider_connections";
+const GITHUB_CONNECTION_ID: &str = "github";
 const OPENAI_CONNECTION_ID: &str = "openai";
 
 struct BridgeState {
@@ -22,6 +23,37 @@ struct GithubWriteAuthorization {
     connection: ProjectConnection,
     account: String,
     permission: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct GithubConnection {
+    provider: String,
+    adapter: String,
+    account: String,
+    credential_profile: String,
+    status: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GithubRepository {
+    name_with_owner: String,
+    url: String,
+    default_branch: Option<String>,
+    is_private: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubRepositoryRecord {
+    name_with_owner: String,
+    url: String,
+    default_branch_ref: Option<GithubDefaultBranch>,
+    is_private: bool,
+}
+
+#[derive(Deserialize)]
+struct GithubDefaultBranch {
+    name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -146,6 +178,64 @@ async fn get_project_connection(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+async fn get_github_connection(
+    state: State<'_, BridgeState>,
+) -> Result<Option<GithubConnection>, String> {
+    let warp_core = state.warp_core.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        warp_core
+            .document(PROVIDER_COLLECTION, GITHUB_CONNECTION_ID)
+            .map_err(|error| error.to_string())?
+            .map(|stored| {
+                stored
+                    .document
+                    .ok_or_else(|| "GitHub connection has been deleted".to_string())
+                    .and_then(|value| {
+                        serde_json::from_value(value).map_err(|error| error.to_string())
+                    })
+            })
+            .transpose()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Uses GitHub CLI's browser authorization boundary. GitHub CLI owns the
+/// access token; NCC persists only non-secret account and adapter metadata.
+#[tauri::command]
+async fn authorize_github_account(
+    state: State<'_, BridgeState>,
+) -> Result<GithubConnection, String> {
+    let warp_core = state.warp_core.clone();
+    tauri::async_runtime::spawn_blocking(move || connect_github_account(&warp_core))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn list_github_repositories(
+    state: State<'_, BridgeState>,
+) -> Result<Vec<GithubRepository>, String> {
+    let warp_core = state.warp_core.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Refresh the native CLI session and its non-secret Warp Core metadata
+        // before asking GitHub for repositories visible to that account.
+        connect_github_account(&warp_core)?;
+        let repositories = gh_text(&[
+            "repo",
+            "list",
+            "--limit",
+            "100",
+            "--json",
+            "nameWithOwner,url,defaultBranchRef,isPrivate",
+        ])?;
+        parse_github_repositories(&repositories)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// Commissions an arbitrary project through a named adapter. The connection is
 /// deliberately metadata-only: provider tokens and Git credentials never enter
 /// the Warp Core document or the webview.
@@ -208,8 +298,8 @@ async fn authorize_github_writes(
         }
 
         let repository = github_repository_slug(&connection.repository)?;
-        ensure_github_cli_authorized()?;
-        let account = gh_text(&["api", "user", "--jq", ".login"])?;
+        let github = connect_github_account(&warp_core)?;
+        let account = github.account;
         let permission = gh_text(&[
             "repo",
             "view",
@@ -227,7 +317,7 @@ async fn authorize_github_writes(
         }
 
         connection.access = ProjectAccess::ReadWrite;
-        connection.credential_profile = Some(format!("gh-cli:github.com/{account}"));
+        connection.credential_profile = Some(github.credential_profile);
         connection.validate().map_err(|error| error.to_string())?;
 
         let mut intent = SaveIntent::upsert(
@@ -246,6 +336,30 @@ async fn authorize_github_writes(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+fn connect_github_account(warp_core: &WarpCore) -> Result<GithubConnection, String> {
+    ensure_github_cli_authorized()?;
+    let account = gh_text(&["api", "user", "--jq", ".login"])?;
+    let connection = GithubConnection {
+        provider: "github".into(),
+        adapter: "gh-cli".into(),
+        credential_profile: format!("gh-cli:github.com/{account}"),
+        account,
+        status: "connected".into(),
+    };
+
+    let current = warp_core
+        .document(PROVIDER_COLLECTION, GITHUB_CONNECTION_ID)
+        .map_err(|error| error.to_string())?;
+    let mut intent = SaveIntent::upsert(
+        PROVIDER_COLLECTION,
+        GITHUB_CONNECTION_ID,
+        serde_json::to_value(&connection).map_err(|error| error.to_string())?,
+    );
+    intent.expected_local_version = current.map(|stored| stored.local_version);
+    warp_core.save(intent).map_err(|error| error.to_string())?;
+    Ok(connection)
 }
 
 fn ensure_github_cli_authorized() -> Result<(), String> {
@@ -323,6 +437,20 @@ fn github_repository_slug(repository: &str) -> Result<String, String> {
         return Err("GitHub repository contains unsupported characters".into());
     }
     Ok(format!("{}/{}", parts[0], parts[1]))
+}
+
+fn parse_github_repositories(value: &str) -> Result<Vec<GithubRepository>, String> {
+    let records: Vec<GithubRepositoryRecord> = serde_json::from_str(value)
+        .map_err(|error| format!("GitHub returned an invalid repository list: {error}"))?;
+    Ok(records
+        .into_iter()
+        .map(|record| GithubRepository {
+            name_with_owner: record.name_with_owner,
+            url: record.url,
+            default_branch: record.default_branch_ref.map(|branch| branch.name),
+            is_private: record.is_private,
+        })
+        .collect())
 }
 
 #[tauri::command]
@@ -549,7 +677,10 @@ pub fn run() {
             assign_command_model,
             get_warp_core_status,
             get_project_connection,
+            get_github_connection,
             connect_project,
+            authorize_github_account,
+            list_github_repositories,
             authorize_github_writes,
             get_openai_connection,
             authorize_openai,
@@ -562,7 +693,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{github_repository_slug, parse_codex_auth_method};
+    use super::{github_repository_slug, parse_codex_auth_method, parse_github_repositories};
 
     #[test]
     fn parses_https_and_ssh_github_repositories() {
@@ -593,5 +724,33 @@ mod tests {
             Some("api_key")
         );
         assert_eq!(parse_codex_auth_method("Not logged in"), None);
+    }
+
+    #[test]
+    fn parses_github_repository_list_without_credentials() {
+        let repositories = parse_github_repositories(
+            r#"[
+                {
+                    "nameWithOwner": "example/private-project",
+                    "url": "https://github.com/example/private-project",
+                    "defaultBranchRef": {"name": "trunk"},
+                    "isPrivate": true
+                },
+                {
+                    "nameWithOwner": "example/empty-project",
+                    "url": "https://github.com/example/empty-project",
+                    "defaultBranchRef": null,
+                    "isPrivate": false
+                }
+            ]"#,
+        )
+        .unwrap();
+
+        assert_eq!(repositories.len(), 2);
+        assert_eq!(repositories[0].name_with_owner, "example/private-project");
+        assert_eq!(repositories[0].default_branch.as_deref(), Some("trunk"));
+        assert!(repositories[0].is_private);
+        assert_eq!(repositories[1].default_branch, None);
+        assert!(!repositories[1].is_private);
     }
 }

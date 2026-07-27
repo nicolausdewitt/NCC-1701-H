@@ -43,10 +43,25 @@ type ProjectConnection = {
   credential_profile: string | null;
 };
 
+type GithubConnection = {
+  provider: string;
+  adapter: string;
+  account: string;
+  credential_profile: string;
+  status: string;
+};
+
 type GithubWriteAuthorization = {
   connection: ProjectConnection;
   account: string;
   permission: string;
+};
+
+type GithubRepository = {
+  name_with_owner: string;
+  url: string;
+  default_branch: string | null;
+  is_private: boolean;
 };
 
 type OpenAiConnection = {
@@ -58,9 +73,24 @@ type OpenAiConnection = {
 };
 
 type Scene = "bridge" | "plan" | "engineering" | "crew";
+type SetupStep = "github" | "project" | "openai" | "staff" | "review";
+type FeedbackState = "idle" | "connecting" | "connected" | "preview" | "error";
 
+const SETUP_COMPLETE_KEY = "ncc-1701-h:commissioning-complete:v2";
+const STAFFING_COMPLETE_KEY = "ncc-1701-h:staffing-brief-complete:v2";
+const setupSteps: SetupStep[] = ["github", "project", "openai", "staff", "review"];
 const isNative = "__TAURI_INTERNALS__" in window;
+
+let githubConnection: GithubConnection | null = null;
+let githubRepositories: GithubRepository[] = [];
+let projectConnection: ProjectConnection | null = null;
 let openAiConnection: OpenAiConnection | null = null;
+let staffingSubmitted = readStoredFlag(STAFFING_COMPLETE_KEY);
+let onboardingComplete = readStoredFlag(SETUP_COMPLETE_KEY);
+let currentSetupStep: SetupStep = "github";
+let furthestSetupStep = 0;
+const previewedSteps = new Set<SetupStep>();
+
 let activeCrew: CrewManifest = {
   command_model: {
     provider: "provider-a",
@@ -76,6 +106,46 @@ let activeCrew: CrewManifest = {
     leader("crusher", "Beverly Crusher", "Quality & Safety Director", "Quality", "provider-b", "diagnostic-model"),
   ],
 };
+
+const commissioning = document.querySelector<HTMLElement>("#commissioning");
+const commandForm = document.querySelector<HTMLFormElement>("#command-form");
+const commandInput = document.querySelector<HTMLInputElement>("#command-input");
+const commandTranscript = document.querySelector<HTMLElement>("#command-transcript");
+
+const githubButton = document.querySelector<HTMLButtonElement>("#setup-github-button");
+const githubResult = document.querySelector<HTMLElement>("#setup-github-result");
+const githubTitle = document.querySelector<HTMLElement>("#setup-github-title");
+const githubDetail = document.querySelector<HTMLElement>("#setup-github-detail");
+const githubAccountLabel = document.querySelector<HTMLElement>("#setup-github-account");
+const githubPreviewNext = document.querySelector<HTMLButtonElement>("#setup-github-preview-next");
+
+const projectForm = document.querySelector<HTMLFormElement>("#setup-project-form");
+const projectAdapterInput = document.querySelector<HTMLInputElement>("#setup-project-adapter");
+const projectPicker = document.querySelector<HTMLSelectElement>("#setup-project-picker");
+const projectNameInput = document.querySelector<HTMLInputElement>("#setup-project-name");
+const projectRepositoryInput = document.querySelector<HTMLInputElement>("#setup-project-repository");
+const projectWorkspaceInput = document.querySelector<HTMLInputElement>("#setup-project-workspace");
+const projectBranchInput = document.querySelector<HTMLInputElement>("#setup-project-branch");
+const projectButton = document.querySelector<HTMLButtonElement>("#setup-project-button");
+const projectResult = document.querySelector<HTMLElement>("#setup-project-result");
+const projectTitle = document.querySelector<HTMLElement>("#setup-project-title");
+const projectDetail = document.querySelector<HTMLElement>("#setup-project-detail");
+const projectState = document.querySelector<HTMLElement>("#setup-project-state");
+const projectPreviewNext = document.querySelector<HTMLButtonElement>("#setup-project-preview-next");
+const bridgeEnableWrites = document.querySelector<HTMLButtonElement>("#bridge-enable-writes");
+
+const openAiButton = document.querySelector<HTMLButtonElement>("#setup-openai-button");
+const openAiResult = document.querySelector<HTMLElement>("#setup-openai-result");
+const openAiTitle = document.querySelector<HTMLElement>("#setup-openai-title");
+const openAiDetail = document.querySelector<HTMLElement>("#setup-openai-detail");
+const openAiModelLabel = document.querySelector<HTMLElement>("#setup-openai-model");
+const openAiPreviewNext = document.querySelector<HTMLButtonElement>("#setup-openai-preview-next");
+
+const staffingForm = document.querySelector<HTMLFormElement>("#setup-staffing-form");
+const staffingPrompt = document.querySelector<HTMLTextAreaElement>("#setup-staffing-prompt");
+const staffingButton = document.querySelector<HTMLButtonElement>("#setup-staffing-button");
+const staffingPreviewNext = document.querySelector<HTMLButtonElement>("#setup-staff-preview-next");
+const enterBridgeButton = document.querySelector<HTMLButtonElement>("#setup-enter-bridge");
 
 function leader(
   id: string,
@@ -94,12 +164,34 @@ function leader(
   };
 }
 
+function readStoredFlag(key: string) {
+  try {
+    return window.localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function storeFlag(key: string, value: boolean) {
+  try {
+    if (value) {
+      window.localStorage.setItem(key, "true");
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // The native state remains authoritative if storage is unavailable.
+  }
+}
+
 function setText(selector: string, text: string) {
   const element = document.querySelector(selector);
   if (element) element.textContent = text;
 }
 
 function setScene(name: Scene) {
+  if (!onboardingComplete && name !== "crew") return;
+
   const isPlanMode = name === "plan";
   const isEngineering = name === "engineering";
   const isCrew = name === "crew";
@@ -131,58 +223,117 @@ function setScene(name: Scene) {
       : isEngineering
         ? "Reproduce, isolate, patch, and verify with a focused technical team."
         : isCrew
-          ? "Connect a project. Assign the right model to every department."
+          ? "Review connections, briefing, and model assignments."
           : "Independent models. One accountable command structure.",
+  );
+  setText(
+    "#ship-location",
+    `AGENT COMMAND HARNESS / ${isPlanMode ? "CONFERENCE" : isEngineering ? "ENGINEERING" : isCrew ? "CREW" : "BRIDGE"}`,
   );
   setText("#table-mode", isEngineering ? "ENGINEERING ROOM" : "PLAN MODE");
   setText("#table-title", isEngineering ? "BUG RESOLUTION" : "PLANNING SESSION");
   setText(
     "#table-subtitle",
-    isEngineering ? "REPRODUCE · ISOLATE · PATCH · VERIFY" : "6 INDEPENDENT PERSPECTIVES",
+    isEngineering ? "REPRODUCE / ISOLATE / PATCH / VERIFY" : "6 INDEPENDENT PERSPECTIVES",
   );
+
   if (commandInput) {
     commandInput.placeholder = isPlanMode
-      ? "Give the planning team a problem to work through…"
+      ? "Give the planning team a problem to work through..."
       : isEngineering
-        ? "Describe the bug, symptoms, and expected behaviour…"
+        ? "Describe the bug, symptoms, and expected behaviour..."
         : isCrew
           ? "Crew configuration does not dispatch commands."
-          : "Give the senior staff an objective…";
+          : "Give the senior staff an objective...";
   }
+
   document.querySelectorAll<HTMLButtonElement>(".nav[data-scene]").forEach((button) => {
     button.classList.toggle("active", button.dataset.scene === name);
   });
+
+  if (isCrew) showSetupStep("review");
 }
 
-document.querySelectorAll<HTMLButtonElement>("[data-scene]").forEach((button) => {
-  button.addEventListener("click", () => {
-    setScene(button.dataset.scene as Scene);
+function showSetupStep(step: SetupStep) {
+  currentSetupStep = step;
+  const stepIndex = setupSteps.indexOf(step);
+  furthestSetupStep = Math.max(furthestSetupStep, stepIndex);
+  if (commissioning) commissioning.dataset.step = step;
+
+  document.querySelectorAll<HTMLElement>("[data-step-panel]").forEach((panel) => {
+    const isActive = panel.dataset.stepPanel === step;
+    panel.classList.toggle("is-active", isActive);
+    panel.setAttribute("aria-hidden", String(!isActive));
   });
+
+  const completed = completedSetupSteps();
+  document.querySelectorAll<HTMLButtonElement>("[data-setup-target]").forEach((button) => {
+    const target = button.dataset.setupTarget as SetupStep;
+    const targetIndex = setupSteps.indexOf(target);
+    const state = target === step
+      ? "current"
+      : completed.has(target)
+        ? "complete"
+        : previewedSteps.has(target)
+          ? "preview"
+          : "pending";
+    button.dataset.state = state;
+    button.disabled = !onboardingComplete && targetIndex > furthestSetupStep;
+    if (target === step) button.setAttribute("aria-current", "step");
+    else button.removeAttribute("aria-current");
+  });
+
+  renderReviewSummary();
+  const activePanel = document.querySelector<HTMLElement>(`[data-step-panel="${step}"]`);
+  activePanel?.querySelector<HTMLElement>("button, input, textarea")?.focus({ preventScroll: true });
+}
+
+function completedSetupSteps() {
+  const complete = new Set<SetupStep>();
+  if (githubConnection) complete.add("github");
+  if (isNative && projectConnection) complete.add("project");
+  if (openAiConnection) complete.add("openai");
+  if (staffingSubmitted) complete.add("staff");
+  if (onboardingComplete) complete.add("review");
+  return complete;
+}
+
+function setOnboardingGate(isGated: boolean) {
+  document.body.dataset.onboarding = isGated ? "active" : "complete";
+  if (isGated) document.body.dataset.scene = "crew";
+  if (enterBridgeButton) {
+    enterBridgeButton.textContent = onboardingComplete
+      ? "RETURN TO BRIDGE"
+      : isNative
+        ? "COMMISSION SHIP / ENTER BRIDGE"
+        : "ENTER BRIDGE PREVIEW";
+  }
+}
+
+function advanceFromPreview(step: SetupStep, next: SetupStep) {
+  previewedSteps.add(step);
+  furthestSetupStep = Math.max(furthestSetupStep, setupSteps.indexOf(next));
+  showSetupStep(next);
+}
+
+document.querySelectorAll<HTMLButtonElement>("button[data-scene]").forEach((button) => {
+  button.addEventListener("click", () => setScene(button.dataset.scene as Scene));
 });
 
-const commandForm = document.querySelector<HTMLFormElement>("#command-form");
-const commandInput = document.querySelector<HTMLInputElement>("#command-input");
-const commandTranscript = document.querySelector<HTMLElement>("#command-transcript");
-const projectForm = document.querySelector<HTMLFormElement>("#project-form");
-const projectAdapterInput = document.querySelector<HTMLSelectElement>("#project-adapter-input");
-const projectNameInput = document.querySelector<HTMLInputElement>("#project-name-input");
-const projectRepositoryInput = document.querySelector<HTMLInputElement>("#project-repository-input");
-const projectWorkspaceInput = document.querySelector<HTMLInputElement>("#project-workspace-input");
-const projectBranchInput = document.querySelector<HTMLInputElement>("#project-branch-input");
-const projectConnectButton = document.querySelector<HTMLButtonElement>("#project-connect-button");
-const projectConnectionResult = document.querySelector<HTMLElement>("#project-connection-result");
-const projectResultTitle = document.querySelector<HTMLElement>("#project-result-title");
-const projectResultDetail = document.querySelector<HTMLElement>("#project-result-detail");
-const projectStepState = document.querySelector<HTMLElement>("#project-step-state");
-const githubAuthorizeButton = document.querySelector<HTMLButtonElement>("#github-authorize-button");
-const commandModelSettings = document.querySelector<HTMLElement>(".command-model-settings");
-const openAiConnectButton = document.querySelector<HTMLButtonElement>("#openai-connect-button");
-const openAiConnectionResult = document.querySelector<HTMLElement>("#openai-connection-result");
-const openAiResultTitle = document.querySelector<HTMLElement>("#openai-result-title");
-const openAiResultDetail = document.querySelector<HTMLElement>("#openai-result-detail");
-const openAiModelLabel = document.querySelector<HTMLElement>("#openai-model-label");
-const staffingForm = document.querySelector<HTMLFormElement>("#staffing-form");
-const staffingPrompt = document.querySelector<HTMLTextAreaElement>("#staffing-prompt");
+document.querySelectorAll<HTMLButtonElement>("[data-setup-target]").forEach((button) => {
+  button.addEventListener("click", () => showSetupStep(button.dataset.setupTarget as SetupStep));
+});
+
+document.querySelectorAll<HTMLButtonElement>("[data-setup-back]").forEach((button) => {
+  button.addEventListener("click", () => showSetupStep(button.dataset.setupBack as SetupStep));
+});
+
+document.querySelectorAll<HTMLButtonElement>("[data-setup-next]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const next = button.dataset.setupNext as SetupStep;
+    advanceFromPreview(currentSetupStep, next);
+  });
+});
 
 commandForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -190,8 +341,8 @@ commandForm?.addEventListener("submit", async (event) => {
   if (!message || !commandInput || !commandTranscript) return;
 
   commandInput.disabled = true;
-  const submitButton = commandForm.querySelector<HTMLButtonElement>("button");
-  if (submitButton) submitButton.disabled = true;
+  const submit = commandForm.querySelector<HTMLButtonElement>("button");
+  if (submit) submit.disabled = true;
 
   try {
     if (isNative) {
@@ -200,19 +351,78 @@ commandForm?.addEventListener("submit", async (event) => {
         text: message,
       });
       commandTranscript.innerHTML = `<b>PICARD</b><span>${escapeHtml(message)}</span>`;
-      setText("#system-status", "COMMAND SAVED · AWAITING FIRST OFFICER");
+      setText("#system-status", "COMMAND SAVED / AWAITING FIRST OFFICER");
     } else {
       commandTranscript.innerHTML =
-        `<b>PREVIEW</b><span>${escapeHtml(message)} · Native Warp Core required to dispatch.</span>`;
+        `<b>PREVIEW</b><span>${escapeHtml(message)} / Native Warp Core required to dispatch.</span>`;
     }
     commandInput.value = "";
   } catch (error) {
-    setText("#system-status", `COMMAND REJECTED · ${String(error)}`);
+    setText("#system-status", `COMMAND REJECTED / ${String(error)}`);
   } finally {
     commandInput.disabled = false;
-    if (submitButton) submitButton.disabled = false;
+    if (submit) submit.disabled = false;
     commandInput.focus();
   }
+});
+
+githubButton?.addEventListener("click", async () => {
+  githubButton.disabled = true;
+  githubButton.textContent = isNative ? "OPENING SECURE SIGN-IN..." : "CHECKING NATIVE HANDOFF...";
+  setGithubFeedback(
+    "connecting",
+    isNative ? "CONTACTING GITHUB" : "WEB PREVIEW",
+    isNative ? "COMPLETE SIGN-IN IN YOUR BROWSER" : "AUTHENTICATION IS DISABLED IN PREVIEW",
+  );
+  const startedAt = performance.now();
+
+  if (!isNative) {
+    await holdFeedbackFor(startedAt, 550);
+    setGithubFeedback("preview", "NATIVE SIGN-IN REQUIRED", "NO ACCOUNT WAS CONNECTED");
+    githubButton.textContent = "SIGN IN WITH GITHUB";
+    githubButton.disabled = false;
+    if (githubPreviewNext) githubPreviewNext.hidden = false;
+    setText("#system-status", "WEB PREVIEW / GITHUB SIGN-IN NOT ATTEMPTED");
+    return;
+  }
+
+  try {
+    githubConnection = await invoke<GithubConnection>("authorize_github_account");
+    await holdFeedbackFor(startedAt, 550);
+    renderGithubConnection(githubConnection);
+    await loadGithubRepositories();
+    furthestSetupStep = Math.max(furthestSetupStep, 1);
+    setText("#system-status", `GITHUB CONNECTED / ${githubConnection.account.toUpperCase()}`);
+    showSetupStep("project");
+  } catch (error) {
+    setGithubFeedback("error", "GITHUB SIGN-IN FAILED", String(error));
+    githubButton.textContent = "RETRY GITHUB SIGN-IN";
+    setText("#system-status", `GITHUB SIGN-IN FAILED / ${String(error)}`);
+  } finally {
+    githubButton.disabled = false;
+  }
+});
+
+projectRepositoryInput?.addEventListener("input", () => {
+  if (!projectNameInput || projectNameInput.value.trim()) return;
+  const repository = projectRepositoryInput.value.trim().replace(/\.git$/, "");
+  const name = repository.split("/").filter(Boolean).at(-1);
+  if (name) projectNameInput.value = name;
+});
+
+projectPicker?.addEventListener("change", () => {
+  const selected = githubRepositories.find((repository) => repository.url === projectPicker.value);
+  if (!selected) return;
+  if (projectRepositoryInput) projectRepositoryInput.value = selected.url;
+  if (projectNameInput) {
+    projectNameInput.value = selected.name_with_owner.split("/").at(-1) ?? selected.name_with_owner;
+  }
+  if (projectBranchInput) projectBranchInput.value = selected.default_branch || "main";
+  setProjectFeedback(
+    "idle",
+    selected.name_with_owner.toUpperCase(),
+    `${selected.is_private ? "PRIVATE" : "PUBLIC"} / ${selected.default_branch || "main"}`,
+  );
 });
 
 projectForm?.addEventListener("submit", async (event) => {
@@ -236,72 +446,92 @@ projectForm?.addEventListener("submit", async (event) => {
     access: "read_only",
     credential_profile: null,
   };
-  if (projectConnectButton) {
-    projectConnectButton.disabled = true;
-    projectConnectButton.textContent = "CONTACTING ADAPTER…";
+  if (projectButton) {
+    projectButton.disabled = true;
+    projectButton.textContent = "CONTACTING PROJECT ADAPTER...";
   }
-  setProjectConnectionFeedback("connecting", "CONTACTING ADAPTER", connection.adapter.toUpperCase());
-  const connectionStartedAt = performance.now();
+  setProjectFeedback("connecting", "CONTACTING GITHUB", "CHECKING PROJECT TARGET");
+  const startedAt = performance.now();
 
   try {
-    const saved = isNative
-      ? await invoke<ProjectConnection>("connect_project", { connection })
-      : connection;
-    await holdFeedbackFor(connectionStartedAt, 500);
-    renderProjectConnection(saved);
-    setProjectConnectionFeedback(
-      isNative ? "connected" : "preview",
-      saved.adapter === "github" ? "READ ONLY" : isNative ? "GIT TARGET SAVED" : "PREVIEW CONFIGURED",
-      saved.adapter === "github"
-        ? "AUTHORISE BEFORE CHANGES"
-        : isNative
-          ? `${saved.adapter.toUpperCase()} · ${saved.default_branch}`
-          : "NATIVE APP PERSISTS IT",
-    );
-    showGithubWriteOffer(saved);
-    if (projectConnectButton) {
-      projectConnectButton.textContent = isNative ? "UPDATE PROJECT" : "CONFIGURED FOR PREVIEW";
+    if (isNative) {
+      projectConnection = await invoke<ProjectConnection>("connect_project", { connection });
+      await holdFeedbackFor(startedAt, 500);
+      renderProjectConnection(projectConnection);
+      setProjectFeedback(
+        "connected",
+        "PROJECT CONNECTED / READ ONLY",
+        `${projectConnection.display_name} / ${projectConnection.default_branch}`,
+      );
+      furthestSetupStep = Math.max(furthestSetupStep, 2);
+      setText("#system-status", "PROJECT SAVED THROUGH WARP CORE / READ ONLY");
+      showSetupStep("openai");
+    } else {
+      projectConnection = connection;
+      await holdFeedbackFor(startedAt, 500);
+      renderProjectConnection(connection);
+      setProjectFeedback("preview", "PREVIEW CONFIGURATION ONLY", "NOT SAVED / NO REPOSITORY ACCESSED");
+      if (projectPreviewNext) projectPreviewNext.hidden = false;
+      setText("#system-status", "WEB PREVIEW / PROJECT CONNECTION NOT ATTEMPTED");
     }
-    if (projectStepState) {
-      projectStepState.textContent = isNative ? "WARP CORE SAVED" : "PREVIEW ONLY";
-    }
-    commandModelSettings?.classList.add("next-step");
-    setText(
-      "#system-status",
-      isNative
-        ? "PROJECT COMMISSIONED · SAVED THROUGH WARP CORE"
-        : "VISUAL PREVIEW · PROJECT CONNECTION SIMULATED",
-    );
   } catch (error) {
-    const message = String(error);
-    setProjectConnectionFeedback("error", "CONNECTION REJECTED", message);
-    if (projectConnectButton) projectConnectButton.textContent = "RETRY CONNECTION";
-    if (projectStepState) projectStepState.textContent = "ACTION REQUIRED";
-    setText("#system-status", `PROJECT REJECTED · ${String(error)}`);
+    setProjectFeedback("error", "PROJECT CONNECTION FAILED", String(error));
+    if (projectButton) projectButton.textContent = "RETRY PROJECT CONNECTION";
+    setText("#system-status", `PROJECT REJECTED / ${String(error)}`);
   } finally {
-    if (projectConnectButton) projectConnectButton.disabled = false;
+    if (projectButton) {
+      projectButton.disabled = false;
+      if (projectButton.textContent === "CONTACTING PROJECT ADAPTER...") {
+        projectButton.textContent = isNative ? "UPDATE PROJECT" : "CONNECT THIS PROJECT";
+      }
+    }
   }
 });
 
-openAiConnectButton?.addEventListener("click", async () => {
-  openAiConnectButton.disabled = true;
-  openAiConnectButton.textContent = isNative ? "OPENING SIGN-IN…" : "CHECKING NATIVE APP…";
-  setOpenAiConnectionFeedback(
+bridgeEnableWrites?.addEventListener("click", async () => {
+  if (!isNative) {
+    setText("#system-status", "WEB PREVIEW / OPEN THE DESKTOP APP TO ENABLE GITHUB CHANGES");
+    pulseRefresh(bridgeEnableWrites);
+    return;
+  }
+
+  bridgeEnableWrites.disabled = true;
+  bridgeEnableWrites.textContent = "CHECKING GITHUB PERMISSION...";
+  try {
+    const authorization = await invoke<GithubWriteAuthorization>("authorize_github_writes");
+    projectConnection = authorization.connection;
+    renderProjectConnection(projectConnection);
+    setText(
+      "#system-status",
+      `GITHUB CHANGES ENABLED / ${authorization.account.toUpperCase()} / ${authorization.permission}`,
+    );
+  } catch (error) {
+    bridgeEnableWrites.hidden = false;
+    bridgeEnableWrites.textContent = "RETRY ENABLE CHANGES";
+    setText("#system-status", `GITHUB AUTHORIZATION FAILED / ${String(error)}`);
+    pulseRefresh(bridgeEnableWrites);
+  } finally {
+    bridgeEnableWrites.disabled = false;
+  }
+});
+
+openAiButton?.addEventListener("click", async () => {
+  openAiButton.disabled = true;
+  openAiButton.textContent = isNative ? "OPENING CHATGPT SIGN-IN..." : "CHECKING NATIVE HANDOFF...";
+  setOpenAiFeedback(
     "connecting",
-    isNative ? "CONTACTING OPENAI" : "NATIVE HANDOFF REQUIRED",
-    isNative ? "CHECKING CODEX SESSION" : "SIGN-IN RUNS OUTSIDE THE WEBVIEW",
+    isNative ? "CHECKING CODEX SESSION" : "WEB PREVIEW",
+    isNative ? "A SIGNED-IN SESSION MAY BE REUSED" : "AUTHENTICATION IS DISABLED IN PREVIEW",
   );
   const startedAt = performance.now();
 
   if (!isNative) {
-    await holdFeedbackFor(startedAt, 600);
-    setOpenAiConnectionFeedback(
-      "preview",
-      "NATIVE APP REQUIRED",
-      "OPEN NCC TO SIGN IN WITH CHATGPT",
-    );
-    openAiConnectButton.textContent = "CONNECT OPENAI";
-    openAiConnectButton.disabled = false;
+    await holdFeedbackFor(startedAt, 550);
+    setOpenAiFeedback("preview", "NATIVE SIGN-IN REQUIRED", "NO OPENAI ACCOUNT WAS CONNECTED");
+    openAiButton.textContent = "CONTINUE WITH CHATGPT";
+    openAiButton.disabled = false;
+    if (openAiPreviewNext) openAiPreviewNext.hidden = false;
+    setText("#system-status", "WEB PREVIEW / OPENAI SIGN-IN NOT ATTEMPTED");
     return;
   }
 
@@ -313,16 +543,18 @@ openAiConnectButton?.addEventListener("click", async () => {
       endpoint: null,
     };
     activeCrew = await invoke<CrewManifest>("assign_command_model", { model });
-    await holdFeedbackFor(startedAt, 600);
+    await holdFeedbackFor(startedAt, 550);
     renderOpenAiConnection(openAiConnection);
-    renderCommandModel(activeCrew);
-    setText("#system-status", "OPENAI CONNECTED · PICARD COMMAND MODEL READY");
+    renderCrew(activeCrew);
+    furthestSetupStep = Math.max(furthestSetupStep, 3);
+    setText("#system-status", "OPENAI CONNECTED / PICARD COMMAND MODEL READY");
+    showSetupStep("staff");
   } catch (error) {
-    setOpenAiConnectionFeedback("error", "OPENAI SIGN-IN FAILED", String(error));
-    openAiConnectButton.textContent = "RETRY OPENAI";
-    setText("#system-status", `OPENAI SIGN-IN FAILED · ${String(error)}`);
+    setOpenAiFeedback("error", "OPENAI SIGN-IN FAILED", String(error));
+    openAiButton.textContent = "RETRY CHATGPT SIGN-IN";
+    setText("#system-status", `OPENAI SIGN-IN FAILED / ${String(error)}`);
   } finally {
-    openAiConnectButton.disabled = false;
+    openAiButton.disabled = false;
   }
 });
 
@@ -330,83 +562,134 @@ staffingForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = staffingPrompt?.value.trim() ?? "";
   if (!prompt || !staffingPrompt) return;
-  if (!openAiConnection) {
-    setText("#system-status", "CONNECT OPENAI BEFORE SUBMITTING A STAFFING BRIEF");
-    openAiConnectButton?.focus();
+
+  if (isNative && !openAiConnection) {
+    setText("#system-status", "CONNECT OPENAI BEFORE BRIEFING PICARD");
+    showSetupStep("openai");
     return;
   }
 
-  const submit = staffingForm.querySelector<HTMLButtonElement>("button[type='submit']");
-  if (submit) submit.disabled = true;
+  if (staffingButton) {
+    staffingButton.disabled = true;
+    staffingButton.textContent = isNative ? "SENDING BRIEF TO PICARD..." : "PREPARING PREVIEW...";
+  }
+
   try {
     if (isNative) {
       await invoke<SavedCommand>("submit_staffing_brief", {
         briefId: crypto.randomUUID(),
         prompt,
       });
+      staffingSubmitted = true;
+      storeFlag(STAFFING_COMPLETE_KEY, true);
+      furthestSetupStep = Math.max(furthestSetupStep, 4);
+      setText("#system-status", "STAFFING BRIEF SAVED / CREW READY FOR REVIEW");
+      showSetupStep("review");
+    } else {
+      await holdFeedbackFor(performance.now(), 450);
+      pulseRefresh(document.querySelector<HTMLElement>(".picard-brief"));
+      if (staffingPreviewNext) staffingPreviewNext.hidden = false;
+      setText("#system-status", "WEB PREVIEW / STAFFING BRIEF NOT DISPATCHED");
     }
-    setText(
-      "#system-status",
-      isNative
-        ? "STAFFING BRIEF SAVED · COMMAND MODEL QUEUED"
-        : "VISUAL PREVIEW · STAFFING BRIEF READY",
-    );
   } catch (error) {
-    setText("#system-status", `STAFFING BRIEF REJECTED · ${String(error)}`);
+    setText("#system-status", `STAFFING BRIEF REJECTED / ${String(error)}`);
   } finally {
-    if (submit) submit.disabled = false;
+    if (staffingButton) {
+      staffingButton.disabled = false;
+      staffingButton.textContent = "ASK PICARD TO STAFF THE SHIP";
+    }
   }
 });
 
-function escapeHtml(value: string) {
-  const span = document.createElement("span");
-  span.textContent = value;
-  return span.innerHTML;
-}
+enterBridgeButton?.addEventListener("click", () => {
+  onboardingComplete = true;
+  staffingSubmitted = true;
+  storeFlag(STAFFING_COMPLETE_KEY, true);
+  storeFlag(SETUP_COMPLETE_KEY, true);
+  setOnboardingGate(false);
+  setScene("bridge");
+  setText(
+    "#system-status",
+    isNative
+      ? "SHIP COMMISSIONED / BRIDGE ONLINE"
+      : "WEB PREVIEW / BRIDGE LAYOUT UNLOCKED",
+  );
+});
 
 async function connectWarpCore() {
+  renderCrew(activeCrew);
+
   if (!isNative) {
-    renderCrew(activeCrew);
-    setText("#system-status", "VISUAL PREVIEW · WARP CORE STANDBY");
+    document.body.dataset.runtime = "preview";
+    setText("#walkthrough-mode", "WEB PREVIEW / NO AUTHENTICATION");
+    setText("#system-status", "WEB PREVIEW / NO ACCOUNTS OR PROJECTS ARE ACCESSED");
+    if (onboardingComplete) {
+      setupSteps.forEach((step) => previewedSteps.add(step));
+      setOnboardingGate(false);
+      setScene("bridge");
+    } else {
+      setOnboardingGate(true);
+      showSetupStep("github");
+    }
     return;
   }
 
   try {
-    const [crew, status, project, openAi] = await Promise.all([
+    const [crew, status, github, project, openAi] = await Promise.all([
       invoke<CrewManifest>("get_crew_manifest"),
       invoke<WarpCoreStatus>("get_warp_core_status"),
+      invoke<GithubConnection | null>("get_github_connection"),
       invoke<ProjectConnection | null>("get_project_connection"),
       invoke<OpenAiConnection | null>("get_openai_connection"),
     ]);
     activeCrew = crew;
+    githubConnection = github;
+    projectConnection = project;
     openAiConnection = openAi;
+
     setText(
       "#system-status",
-      `WARP CORE ONLINE · ${crew.leaders.length} OFFICERS · ${status.queued + status.retry} TO BASE`,
+      `WARP CORE ONLINE / ${crew.leaders.length} OFFICERS / ${status.queued + status.retry} TO BASE`,
     );
     setText("#metric-core", "ONLINE");
     setText("#metric-officers", String(crew.leaders.length).padStart(2, "0"));
     setText("#metric-queue", String(status.queued + status.retry).padStart(2, "0"));
     renderCrew(crew);
-    if (project) {
-      renderProjectConnection(project);
-      setProjectConnectionFeedback(
-        "connected",
-        project.adapter === "github" && project.access === "read_only"
-          ? "READ ONLY"
-          : "GIT TARGET SAVED",
-        project.adapter === "github" && project.access === "read_only"
-          ? "AUTHORISE BEFORE CHANGES"
-          : `${project.adapter.toUpperCase()} · ${project.default_branch}`,
-      );
-      showGithubWriteOffer(project);
-      if (projectConnectButton) projectConnectButton.textContent = "UPDATE PROJECT";
-      if (projectStepState) projectStepState.textContent = "WARP CORE SAVED";
+    if (github) {
+      renderGithubConnection(github);
+      await loadGithubRepositories();
     }
+    if (project) renderProjectConnection(project);
     if (openAi) renderOpenAiConnection(openAi);
+
+    const firstIncomplete = getFirstIncompleteStep();
+    if (onboardingComplete && firstIncomplete === "review") {
+      setOnboardingGate(false);
+      setScene("bridge");
+      return;
+    }
+
+    if (onboardingComplete && firstIncomplete !== "review") {
+      onboardingComplete = false;
+      storeFlag(SETUP_COMPLETE_KEY, false);
+    }
+    setOnboardingGate(true);
+    furthestSetupStep = setupSteps.indexOf(firstIncomplete);
+    showSetupStep(firstIncomplete);
   } catch (error) {
-    setText("#system-status", `WARP CORE OFFLINE · ${String(error)}`);
+    onboardingComplete = false;
+    setOnboardingGate(true);
+    showSetupStep("github");
+    setText("#system-status", `WARP CORE OFFLINE / ${String(error)}`);
   }
+}
+
+function getFirstIncompleteStep(): SetupStep {
+  if (!githubConnection) return "github";
+  if (!projectConnection) return "project";
+  if (!openAiConnection) return "openai";
+  if (!staffingSubmitted) return "staff";
+  return "review";
 }
 
 function renderCrew(crew: CrewManifest) {
@@ -416,51 +699,134 @@ function renderCrew(crew: CrewManifest) {
 }
 
 function renderCommandModel(crew: CrewManifest) {
-  if (!openAiConnection) {
-    if (openAiModelLabel) openAiModelLabel.textContent = "MODEL · AFTER SIGN-IN";
+  if (!openAiConnection || !crew.command_model) {
+    if (openAiModelLabel) openAiModelLabel.textContent = "MODEL / AFTER SIGN-IN";
     return;
   }
-  if (!crew.command_model) return;
   if (openAiModelLabel) {
     openAiModelLabel.textContent =
       crew.command_model.model === "codex-default"
-        ? "MODEL · AUTO"
-        : `MODEL · ${crew.command_model.model.toUpperCase()}`;
+        ? "MODEL / AUTO"
+        : `MODEL / ${crew.command_model.model.toUpperCase()}`;
   }
+}
+
+function renderGithubConnection(connection: GithubConnection) {
+  setGithubFeedback(
+    "connected",
+    `SIGNED IN AS ${connection.account.toUpperCase()}`,
+    `${connection.adapter.toUpperCase()} / ${connection.status.toUpperCase()}`,
+  );
+  if (githubAccountLabel) githubAccountLabel.textContent = `ACCOUNT / ${connection.account.toUpperCase()}`;
+  if (githubButton) githubButton.textContent = "GITHUB CONNECTED";
+  renderReviewSummary();
+}
+
+async function loadGithubRepositories() {
+  if (!projectPicker) return;
+
+  projectPicker.disabled = true;
+  projectPicker.replaceChildren(repositoryOption("", "LOADING YOUR GITHUB REPOSITORIES..."));
+  try {
+    githubRepositories = await invoke<GithubRepository[]>("list_github_repositories");
+    const prompt = repositoryOption(
+      "",
+      githubRepositories.length > 0
+        ? `CHOOSE A REPOSITORY / ${githubRepositories.length} AVAILABLE`
+        : "NO REPOSITORIES RETURNED / USE MANUAL URL",
+    );
+    projectPicker.replaceChildren(
+      prompt,
+      ...githubRepositories.map((repository) =>
+        repositoryOption(
+          repository.url,
+          `${repository.name_with_owner}${repository.is_private ? " / PRIVATE" : ""}`,
+        ),
+      ),
+    );
+    const connectedRepository = projectConnection?.repository;
+    if (
+      connectedRepository &&
+      githubRepositories.some((repository) => repository.url === connectedRepository)
+    ) {
+      projectPicker.value = connectedRepository;
+    }
+  } catch (error) {
+    githubRepositories = [];
+    projectPicker.replaceChildren(repositoryOption("", "REPOSITORY LIST UNAVAILABLE / USE MANUAL URL"));
+    setText("#system-status", `GITHUB REPOSITORY LIST UNAVAILABLE / ${String(error)}`);
+  } finally {
+    projectPicker.disabled = false;
+  }
+}
+
+function repositoryOption(value: string, label: string) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
 }
 
 function renderOpenAiConnection(connection: OpenAiConnection) {
-  const method = connection.auth_method === "chatgpt" ? "CHATGPT" : "API KEY";
-  setOpenAiConnectionFeedback("connected", "OPENAI CONNECTED", `${method} · CODEX SESSION`);
-  if (openAiConnectButton) openAiConnectButton.textContent = "OPENAI CONNECTED";
-  commandModelSettings?.classList.remove("next-step");
+  const method = connection.auth_method === "chatgpt" ? "CHATGPT" : connection.auth_method.toUpperCase();
+  setOpenAiFeedback("connected", "OPENAI CONNECTED", `${method} / CODEX SESSION`);
+  if (openAiButton) openAiButton.textContent = "OPENAI CONNECTED";
+  renderCommandModel(activeCrew);
+  renderReviewSummary();
 }
 
-function setOpenAiConnectionFeedback(
-  state: "idle" | "connecting" | "connected" | "preview" | "error",
-  title: string,
-  detail: string,
-) {
-  if (openAiConnectionResult) openAiConnectionResult.dataset.state = state;
-  if (openAiResultTitle) openAiResultTitle.textContent = title;
-  if (openAiResultDetail) openAiResultDetail.textContent = detail;
-  if (state === "connected" || state === "preview" || state === "error") {
-    pulseRefresh(openAiConnectionResult);
+function renderProjectConnection(connection: ProjectConnection) {
+  setText("#project-adapter", connection.adapter.toUpperCase());
+  setText("#project-name", connection.display_name.toUpperCase());
+  setText(
+    "#project-summary",
+    `${connection.repository} / ${connection.default_branch} / ${connection.access === "read_write" ? "WRITE ENABLED" : "READ ONLY"}`,
+  );
+  if (projectAdapterInput) projectAdapterInput.value = connection.adapter;
+  if (projectNameInput) projectNameInput.value = connection.display_name;
+  if (projectRepositoryInput) projectRepositoryInput.value = connection.repository;
+  if (projectWorkspaceInput) projectWorkspaceInput.value = connection.workspace_path ?? "";
+  if (projectBranchInput) projectBranchInput.value = connection.default_branch;
+  if (projectState) projectState.textContent = isNative ? "WARP CORE SAVED" : "PREVIEW ONLY";
+  if (projectButton) projectButton.textContent = isNative ? "UPDATE PROJECT" : "CONNECT THIS PROJECT";
+  if (bridgeEnableWrites) {
+    bridgeEnableWrites.hidden =
+      connection.adapter !== "github" || connection.access !== "read_only";
+    bridgeEnableWrites.textContent = "ENABLE GITHUB CHANGES";
   }
+  pulseRefresh(
+    document.querySelector<HTMLElement>("#project-name"),
+    document.querySelector<HTMLElement>("#project-adapter"),
+  );
+  renderReviewSummary();
+}
+
+function renderReviewSummary() {
+  setText(
+    "#review-github",
+    isNative ? githubConnection?.account.toUpperCase() ?? "NOT CONNECTED" : "PREVIEW ONLY",
+  );
+  setText(
+    "#review-project",
+    isNative
+      ? projectConnection?.display_name.toUpperCase() ?? "NOT SELECTED"
+      : projectConnection?.display_name.toUpperCase() ?? "PREVIEW ONLY",
+  );
+  setText("#review-openai", isNative ? (openAiConnection ? "OPENAI" : "NOT CONNECTED") : "PREVIEW ONLY");
 }
 
 function renderModelAssignments(crew: CrewManifest) {
   const list = document.querySelector<HTMLElement>("#crew-models");
   if (!list) return;
   list.replaceChildren(
-    ...crew.leaders.slice(0, 6).map((leader) => {
+    ...crew.leaders.slice(0, 6).map((crewLeader) => {
       const row = document.createElement("div");
       const dot = document.createElement("i");
-      dot.className = `dot ${departmentDotClass(leader.department)}`;
+      dot.className = `dot ${departmentDotClass(crewLeader.department)}`;
       const name = document.createElement("strong");
-      name.textContent = leader.display_name.split(" ").at(-1) ?? leader.display_name;
+      name.textContent = crewLeader.display_name.split(" ").at(-1) ?? crewLeader.display_name;
       const model = document.createElement("span");
-      model.textContent = leader.model.model;
+      model.textContent = crewLeader.model.model;
       row.append(dot, name, model);
       return row;
     }),
@@ -468,7 +834,7 @@ function renderModelAssignments(crew: CrewManifest) {
 }
 
 function renderModelSettings(crew: CrewManifest) {
-  const settings = document.querySelector<HTMLElement>("#model-settings");
+  const settings = document.querySelector<HTMLElement>("#setup-model-settings");
   if (!settings) return;
 
   settings.replaceChildren(
@@ -537,101 +903,49 @@ async function assignModel(form: HTMLFormElement, crewLeader: TeamLeader) {
     } else {
       activeCrew = {
         ...activeCrew,
-        leaders: activeCrew.leaders.map((leaderEntry) =>
-          leaderEntry.id === crewLeader.id
-            ? { ...leaderEntry, model: assignment }
-            : leaderEntry,
+        leaders: activeCrew.leaders.map((entry) =>
+          entry.id === crewLeader.id ? { ...entry, model: assignment } : entry,
         ),
       };
     }
     renderCrew(activeCrew);
     setText(
       "#system-status",
-      `${crewLeader.display_name.toUpperCase()} · MODEL ASSIGNMENT SAVED`,
+      isNative
+        ? `${crewLeader.display_name.toUpperCase()} / MODEL ASSIGNMENT SAVED`
+        : `${crewLeader.display_name.toUpperCase()} / PREVIEW MODEL UPDATED / NOT SAVED`,
     );
   } catch (error) {
-    setText("#system-status", `MODEL ASSIGNMENT REJECTED · ${String(error)}`);
+    setText("#system-status", `MODEL ASSIGNMENT REJECTED / ${String(error)}`);
     if (submit) submit.disabled = false;
   }
 }
 
-function renderProjectConnection(connection: ProjectConnection) {
-  setText("#project-adapter", connection.adapter.toUpperCase());
-  setText("#project-name", connection.display_name.toUpperCase());
-  setText(
-    "#project-summary",
-    `${connection.repository} · ${connection.default_branch} · ${connection.access === "read_write" ? "WRITE ENABLED" : "READ ONLY"}`,
-  );
-
-  if (projectAdapterInput) projectAdapterInput.value = connection.adapter;
-  if (projectNameInput) projectNameInput.value = connection.display_name;
-  if (projectRepositoryInput) projectRepositoryInput.value = connection.repository;
-  if (projectWorkspaceInput) projectWorkspaceInput.value = connection.workspace_path ?? "";
-  if (projectBranchInput) projectBranchInput.value = connection.default_branch;
-
-  pulseRefresh(
-    document.querySelector<HTMLElement>("#project-name"),
-    document.querySelector<HTMLElement>("#project-adapter"),
-  );
+function setGithubFeedback(state: FeedbackState, title: string, detail: string) {
+  setConnectionFeedback(githubResult, githubTitle, githubDetail, state, title, detail);
 }
 
-function showGithubWriteOffer(connection: ProjectConnection) {
-  const shouldOffer = connection.adapter === "github" && connection.access === "read_only";
-  if (githubAuthorizeButton) {
-    githubAuthorizeButton.hidden = !shouldOffer;
-    githubAuthorizeButton.textContent = "AUTHORISE";
-  }
-  projectConnectionResult?.classList.toggle("has-action", shouldOffer);
+function setProjectFeedback(state: FeedbackState, title: string, detail: string) {
+  setConnectionFeedback(projectResult, projectTitle, projectDetail, state, title, detail);
 }
 
-githubAuthorizeButton?.addEventListener("click", async () => {
-  githubAuthorizeButton.hidden = true;
-  projectConnectionResult?.classList.remove("has-action");
+function setOpenAiFeedback(state: FeedbackState, title: string, detail: string) {
+  setConnectionFeedback(openAiResult, openAiTitle, openAiDetail, state, title, detail);
+}
 
-  if (!isNative) {
-    setProjectConnectionFeedback(
-      "preview",
-      "NATIVE AUTH REQUIRED",
-      "OPEN NCC TO AUTHORISE VIA GITHUB",
-    );
-    return;
-  }
-
-  setProjectConnectionFeedback("connecting", "OPENING GITHUB", "COMPLETE BROWSER AUTHORISATION");
-  setText("#system-status", "WAITING FOR GITHUB AUTHORISATION");
-  try {
-    const authorization = await invoke<GithubWriteAuthorization>("authorize_github_writes");
-    renderProjectConnection(authorization.connection);
-    showGithubWriteOffer(authorization.connection);
-    setProjectConnectionFeedback(
-      "connected",
-      "WRITE ENABLED",
-      `${authorization.account.toUpperCase()} · ${authorization.permission}`,
-    );
-    if (projectStepState) projectStepState.textContent = "GITHUB API AUTHORISED";
-    setText(
-      "#system-status",
-      `GITHUB API CONNECTED · ${authorization.account.toUpperCase()} · ${authorization.permission}`,
-    );
-  } catch (error) {
-    setProjectConnectionFeedback("error", "GITHUB AUTH FAILED", String(error));
-    githubAuthorizeButton.hidden = false;
-    githubAuthorizeButton.textContent = "RETRY AUTH";
-    projectConnectionResult?.classList.add("has-action");
-    setText("#system-status", `GITHUB AUTHORISATION FAILED · ${String(error)}`);
-  }
-});
-
-function setProjectConnectionFeedback(
-  state: "idle" | "connecting" | "connected" | "preview" | "error",
+function setConnectionFeedback(
+  result: HTMLElement | null,
+  titleElement: HTMLElement | null,
+  detailElement: HTMLElement | null,
+  state: FeedbackState,
   title: string,
   detail: string,
 ) {
-  if (projectConnectionResult) projectConnectionResult.dataset.state = state;
-  if (projectResultTitle) projectResultTitle.textContent = title;
-  if (projectResultDetail) projectResultDetail.textContent = detail;
+  if (result) result.dataset.state = state;
+  if (titleElement) titleElement.textContent = title;
+  if (detailElement) detailElement.textContent = detail;
   if (state === "connected" || state === "preview" || state === "error") {
-    pulseRefresh(projectConnectionResult);
+    pulseRefresh(result);
   }
 }
 
@@ -654,6 +968,12 @@ async function holdFeedbackFor(startedAt: number, minimumMs: number) {
   if (remaining > 0) {
     await new Promise((resolve) => window.setTimeout(resolve, remaining));
   }
+}
+
+function escapeHtml(value: string) {
+  const span = document.createElement("span");
+  span.textContent = value;
+  return span.innerHTML;
 }
 
 function departmentDotClass(department: string) {

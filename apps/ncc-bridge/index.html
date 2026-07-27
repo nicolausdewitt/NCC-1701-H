@@ -6,14 +6,14 @@
     <meta name="theme-color" content="#05070d" />
     <title>NCC-1701-H</title>
   </head>
-  <body data-scene="bridge">
+  <body data-scene="crew" data-onboarding="pending">
     <div id="lcars">
       <header class="top-rail">
         <div class="elbow salmon"><span>47</span></div>
         <div class="rail-block amber">NCC</div>
         <div class="title">
           <strong>NCC-1701-H</strong>
-          <span>AGENT COMMAND HARNESS / BRIDGE</span>
+          <span id="ship-location">AGENT COMMAND HARNESS / COMMISSIONING</span>
         </div>
         <div class="rail-fill lavender"></div>
         <div class="rail-block blue">OPS 1701</div>
@@ -64,6 +64,9 @@
                 <small>MISSION HARNESS</small>
                 <strong id="project-name">NO PROJECT COMMISSIONED</strong>
                 <p id="project-summary">Connect any Git project, then give the crew an objective.</p>
+                <button id="bridge-enable-writes" class="permission-offer" type="button" hidden>
+                  ENABLE GITHUB CHANGES
+                </button>
               </div>
               <div class="panel-actions">
                 <button class="panel-action" data-scene="plan">CONVENE PLAN MODE</button>
@@ -128,30 +131,104 @@
           </div>
         </section>
 
-        <section class="commissioning" aria-label="Project and crew commissioning">
-          <div class="commissioning-sequence">
-            <article class="settings-panel project-settings">
-              <header>
-                <span>01 / CONNECT GIT</span>
-                <b id="project-step-state">PROJECT ADAPTER</b>
-              </header>
-              <form id="project-form" class="project-form">
-                <label>
-                  <span>ADAPTER</span>
-                  <select id="project-adapter-input" name="adapter">
-                    <option value="github">GitHub</option>
-                    <option value="local-git">Local Git</option>
-                    <option value="external">External adapter</option>
+        <section
+          id="commissioning"
+          class="commissioning"
+          data-step="github"
+          aria-label="Guided ship commissioning"
+        >
+          <header class="walkthrough-header">
+            <div class="walkthrough-kicker">
+              <span>SHIP COMMISSIONING</span>
+              <b id="walkthrough-mode">SECURE NATIVE SETUP</b>
+            </div>
+            <ol class="setup-progress" aria-label="Commissioning progress">
+              <li><button type="button" data-setup-target="github"><small>01</small><span>GITHUB</span></button></li>
+              <li><button type="button" data-setup-target="project"><small>02</small><span>PROJECT</span></button></li>
+              <li><button type="button" data-setup-target="openai"><small>03</small><span>OPENAI</span></button></li>
+              <li><button type="button" data-setup-target="staff"><small>04</small><span>STAFF</span></button></li>
+              <li><button type="button" data-setup-target="review"><small>05</small><span>REVIEW</span></button></li>
+            </ol>
+          </header>
+
+          <div class="walkthrough-viewport">
+            <article class="walkthrough-stage is-active" data-step-panel="github">
+              <div class="stage-copy">
+                <span class="stage-number">01 / 05</span>
+                <p class="stage-overline">ESTABLISH SHORE LINK</p>
+                <h2>Sign in to GitHub</h2>
+                <p class="stage-intro">
+                  Connect your GitHub account first. Your browser handles authentication;
+                  NCC-1701-H never asks for or stores your password.
+                </p>
+                <ul class="trust-list">
+                  <li>Uses the native GitHub CLI browser flow</li>
+                  <li>Credentials stay outside the LCARS webview</li>
+                  <li>Repository access is selected in the next step</li>
+                </ul>
+              </div>
+              <div class="stage-console">
+                <div class="provider-identity github-identity">
+                  <span class="provider-mark" aria-hidden="true">GH</span>
+                  <span><strong>GITHUB</strong><small>ACCOUNT CONNECTION</small></span>
+                </div>
+                <div
+                  id="setup-github-result"
+                  class="connection-result large-result"
+                  data-state="idle"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <i aria-hidden="true"></i>
+                  <span>
+                    <strong id="setup-github-title">NOT SIGNED IN</strong>
+                    <small id="setup-github-detail">READY FOR SECURE BROWSER SIGN-IN</small>
+                  </span>
+                  <b id="setup-github-account">ACCOUNT / NONE</b>
+                </div>
+                <button id="setup-github-button" class="primary-setup-action" type="button">
+                  SIGN IN WITH GITHUB
+                </button>
+                <button
+                  id="setup-github-preview-next"
+                  class="preview-next-action"
+                  type="button"
+                  data-setup-next="project"
+                  hidden
+                >
+                  PREVIEW NEXT STEP
+                </button>
+              </div>
+            </article>
+
+            <article class="walkthrough-stage" data-step-panel="project">
+              <div class="stage-heading">
+                <div>
+                  <span class="stage-number">02 / 05</span>
+                  <p class="stage-overline">SELECT MISSION</p>
+                  <h2>Connect a repository</h2>
+                </div>
+                <p>
+                  Choose the project this ship will serve. The first connection is read-only;
+                  write permission can be granted later when a mission needs it.
+                </p>
+              </div>
+              <form id="setup-project-form" class="project-form walkthrough-form">
+                <input id="setup-project-adapter" name="adapter" type="hidden" value="github" />
+                <label class="repository-picker-field">
+                  <span>YOUR GITHUB REPOSITORIES</span>
+                  <select id="setup-project-picker" name="repositoryPicker" disabled>
+                    <option value="">SIGN IN TO LOAD YOUR REPOSITORIES</option>
                   </select>
                 </label>
                 <label>
                   <span>DISPLAY NAME</span>
-                  <input id="project-name-input" name="displayName" required placeholder="My project" />
+                  <input id="setup-project-name" name="displayName" required placeholder="My project" />
                 </label>
-                <label class="wide">
-                  <span>REPOSITORY</span>
+                <label class="repository-field">
+                  <span>REPOSITORY URL <small>MANUAL FALLBACK</small></span>
                   <input
-                    id="project-repository-input"
+                    id="setup-project-repository"
                     name="repository"
                     required
                     placeholder="https://github.com/owner/repository"
@@ -159,90 +236,166 @@
                 </label>
                 <label>
                   <span>LOCAL CHECKOUT <small>OPTIONAL</small></span>
-                  <input
-                    id="project-workspace-input"
-                    name="workspacePath"
-                    placeholder="C:\src\project"
-                  />
+                  <input id="setup-project-workspace" name="workspacePath" placeholder="C:\src\project" />
                 </label>
                 <label>
                   <span>DEFAULT BRANCH</span>
-                  <input id="project-branch-input" name="defaultBranch" value="main" required />
+                  <input id="setup-project-branch" name="defaultBranch" value="main" required />
                 </label>
-                <button id="project-connect-button" type="submit">CONNECT PROJECT</button>
                 <div
-                  id="project-connection-result"
-                  class="connection-result"
+                  id="setup-project-result"
+                  class="connection-result large-result form-result"
                   data-state="idle"
                   role="status"
                   aria-live="polite"
                 >
                   <i aria-hidden="true"></i>
                   <span>
-                    <strong id="project-result-title">NOT CONNECTED</strong>
-                    <small id="project-result-detail">AWAITING PROJECT</small>
+                    <strong id="setup-project-title">NO PROJECT SELECTED</strong>
+                    <small id="setup-project-detail">READ-ONLY CONNECTION</small>
                   </span>
+                  <b id="setup-project-state">AWAITING PROJECT</b>
+                </div>
+                <div class="stage-actions">
+                  <button class="back-action" type="button" data-setup-back="github">BACK</button>
+                  <button id="setup-project-button" class="primary-setup-action" type="submit">
+                    CONNECT THIS PROJECT
+                  </button>
                   <button
-                    id="github-authorize-button"
+                    id="setup-project-preview-next"
+                    class="preview-next-action"
                     type="button"
-                    title="Authorise GitHub write access"
+                    data-setup-next="openai"
                     hidden
                   >
-                    AUTHORISE
+                    PREVIEW NEXT STEP
                   </button>
                 </div>
               </form>
-              <p class="settings-note">Git credentials stay with the adapter, never the webview.</p>
             </article>
 
-            <article class="settings-panel command-model-settings">
-              <header>
-                <span>02 / CONNECT OPENAI</span>
-                <b>PICARD</b>
-              </header>
-              <div class="provider-auth-card">
-                <span class="provider-mark" aria-hidden="true">AI</span>
-                <span class="provider-auth-copy">
-                  <strong>OPENAI</strong>
-                  <small>SIGN IN WITH CHATGPT</small>
-                </span>
-                <button id="openai-connect-button" type="button">CONNECT OPENAI</button>
+            <article class="walkthrough-stage" data-step-panel="openai">
+              <div class="stage-copy">
+                <span class="stage-number">03 / 05</span>
+                <p class="stage-overline">CONNECT COMMAND MODEL</p>
+                <h2>Continue with ChatGPT</h2>
+                <p class="stage-intro">
+                  Give Picard a command model through the supported Codex sign-in flow. An
+                  existing Codex session may be reused automatically.
+                </p>
+                <ul class="trust-list">
+                  <li>Authentication opens outside this interface</li>
+                  <li>No API key or ChatGPT password is entered here</li>
+                  <li>You choose specialist models for each officer later</li>
+                </ul>
               </div>
-              <div
-                id="openai-connection-result"
-                class="connection-result provider-connection-result"
-                data-state="idle"
-                role="status"
-                aria-live="polite"
-              >
-                <i aria-hidden="true"></i>
-                <span>
-                  <strong id="openai-result-title">NOT CONNECTED</strong>
-                  <small id="openai-result-detail">BROWSER SIGN-IN · NO PASSWORD IN LCARS</small>
-                </span>
-                <b id="openai-model-label">MODEL · AUTO</b>
+              <div class="stage-console">
+                <div class="provider-identity">
+                  <span class="provider-mark" aria-hidden="true">AI</span>
+                  <span><strong>OPENAI</strong><small>CODEX / CHATGPT CONNECTION</small></span>
+                </div>
+                <div
+                  id="setup-openai-result"
+                  class="connection-result large-result"
+                  data-state="idle"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <i aria-hidden="true"></i>
+                  <span>
+                    <strong id="setup-openai-title">NOT CONNECTED</strong>
+                    <small id="setup-openai-detail">NO PASSWORD OR API KEY IN LCARS</small>
+                  </span>
+                  <b id="setup-openai-model">MODEL / AFTER SIGN-IN</b>
+                </div>
+                <div class="stage-actions">
+                  <button class="back-action" type="button" data-setup-back="project">BACK</button>
+                  <button id="setup-openai-button" class="primary-setup-action" type="button">
+                    CONTINUE WITH CHATGPT
+                  </button>
+                  <button
+                    id="setup-openai-preview-next"
+                    class="preview-next-action"
+                    type="button"
+                    data-setup-next="staff"
+                    hidden
+                  >
+                    PREVIEW NEXT STEP
+                  </button>
+                </div>
               </div>
-              <form id="staffing-form" class="staffing-form">
+            </article>
+
+            <article class="walkthrough-stage" data-step-panel="staff">
+              <div class="stage-heading">
+                <div>
+                  <span class="stage-number">04 / 05</span>
+                  <p class="stage-overline">CAPTAIN'S BRIEFING</p>
+                  <h2>Staff the ship</h2>
+                </div>
+                <p>
+                  Tell Picard what this project is, what matters most, and where the risks are.
+                  He will use the brief to propose the right specialist crew.
+                </p>
+              </div>
+              <form id="setup-staffing-form" class="staffing-form walkthrough-staffing-form">
                 <label>
-                  <span>STAFFING BRIEF</span>
+                  <span>PROJECT AND STAFFING BRIEF</span>
                   <textarea
-                    id="staffing-prompt"
+                    id="setup-staffing-prompt"
                     required
-                    placeholder="Read this project and propose the right models, tools, and focus for each department…"
+                    placeholder="Describe the project, its goal, constraints, stack, and the work you expect the crew to handle..."
                   ></textarea>
                 </label>
-                <button type="submit">ASK PICARD TO STAFF THE SHIP</button>
+                <aside class="picard-brief">
+                  <small>JEAN-LUC PICARD</small>
+                  <strong>COMMAND INTERFACE</strong>
+                  <p>
+                    Give me the mission and its constraints. I will assemble independent
+                    perspectives, then bring the proposed roster to you for approval.
+                  </p>
+                </aside>
+                <div class="stage-actions">
+                  <button class="back-action" type="button" data-setup-back="openai">BACK</button>
+                  <button id="setup-staffing-button" class="primary-setup-action" type="submit">
+                    ASK PICARD TO STAFF THE SHIP
+                  </button>
+                  <button
+                    id="setup-staff-preview-next"
+                    class="preview-next-action"
+                    type="button"
+                    data-setup-next="review"
+                    hidden
+                  >
+                    PREVIEW CREW REVIEW
+                  </button>
+                </div>
               </form>
             </article>
-          </div>
 
-          <article class="settings-panel model-settings">
-            <header>
-              <span>03 / REVIEW CREW</span>
-              <b>OWNER APPROVAL</b>
-            </header>
-            <div id="model-settings" class="model-settings-grid"></div>
-          </article>
+            <article class="walkthrough-stage review-stage" data-step-panel="review">
+              <div class="review-heading">
+                <div>
+                  <span class="stage-number">05 / 05</span>
+                  <p class="stage-overline">OWNER APPROVAL</p>
+                  <h2>Review the senior staff</h2>
+                </div>
+                <div class="commissioning-summary" aria-label="Connection summary">
+                  <span><small>GITHUB</small><strong id="review-github">CONNECTED</strong></span>
+                  <span><small>PROJECT</small><strong id="review-project">SELECTED</strong></span>
+                  <span><small>COMMAND</small><strong id="review-openai">OPENAI</strong></span>
+                </div>
+              </div>
+              <div id="setup-model-settings" class="model-settings-grid"></div>
+              <div class="review-actions">
+                <button class="back-action" type="button" data-setup-back="staff">BACK</button>
+                <p>Every specialist can use a different provider and model.</p>
+                <button id="setup-enter-bridge" class="primary-setup-action" type="button">
+                  COMMISSION SHIP / ENTER BRIDGE
+                </button>
+              </div>
+            </article>
+          </div>
         </section>
 
         <section id="command-transcript" class="command-transcript" aria-live="polite">

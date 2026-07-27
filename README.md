@@ -71,12 +71,17 @@ the professional role to a particular vendor.
 
 ## Commissioning a project
 
-The public harness follows a three-step commissioning flow:
+The public harness uses a focused first-run commissioning walkthrough:
 
-1. connect any GitHub, local Git, or external project adapter;
-2. connect OpenAI behind the Captain interface using **Sign in with ChatGPT**;
-3. give that model a staffing brief and approve its proposed assignments for
-   the department heads.
+1. sign in to GitHub through the native browser flow;
+2. choose a repository and connect it read-only;
+3. connect OpenAI behind the Captain interface using **Sign in with ChatGPT**;
+4. give that model a staffing brief;
+5. review the proposed department assignments and commission the ship.
+
+The normal LCARS navigation remains hidden until commissioning is complete.
+Each connection, decision, and review therefore gets the full content panel
+instead of competing with the operational Bridge interface.
 
 The project record contains a repository locator and optional local checkout,
 not a token. Git and model credentials remain in native adapters and secret
@@ -87,14 +92,15 @@ OpenAI authentication is delegated to the native Codex login flow. The default
 button opens browser sign-in when needed and otherwise reuses the existing
 ChatGPT session; Warp Core records only a non-secret adapter profile.
 
-Connections begin read-only. The Bridge offers a separate GitHub authorization
-step before any agent may change a repository, and stores only a native
+Connections begin read-only. Signing in identifies the GitHub account and lets
+the native adapter list repositories; it does not authorize changes. Enabling
+repository writes remains a separate owner action, and stores only a native
 credential-profile reference after authorization.
 
 The initial native GitHub provider uses GitHub CLI's browser authorization and
-API client. Read-only connections do not require it; write authorization
-requires `gh` to be installed and verifies the selected account's permission on
-that exact repository.
+API client. First-run GitHub sign-in requires `gh` to be installed. Later write
+authorization verifies the selected account's permission on that exact
+repository before Warp Core records the capability.
 
 A private codebase is just one mission target and receives no special case in
 the public code, so another developer can point the same ship at their own

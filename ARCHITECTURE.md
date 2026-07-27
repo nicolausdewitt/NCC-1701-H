@@ -53,12 +53,17 @@ Changing one leader's assignment does not alter another leader. Credentials are
 never part of this assignment and will be resolved through a separate secret
 store.
 
-Commissioning starts with a separate command model behind the Captain
-interface. The owner connects a project, authenticates OpenAI, and gives the
-command model a staffing brief. The initial native adapter reuses Codex's
-supported **Sign in with ChatGPT** browser flow and shared credential cache.
-NCC stores only `codex-cli:shared-login`; ChatGPT credentials and access tokens
-never enter the LCARS webview or Warp Core.
+Commissioning is a gated, full-content-panel walkthrough before the operational
+LCARS navigation appears. The owner signs in to GitHub, chooses a read-only
+project connection, authenticates OpenAI, briefs the command model, and reviews
+the proposed crew before commissioning the ship. Account authentication,
+repository selection, and repository write authority are deliberately separate
+decisions.
+
+The initial OpenAI adapter reuses Codex's supported **Sign in with ChatGPT**
+browser flow and shared credential cache. NCC stores only
+`codex-cli:shared-login`; ChatGPT credentials and access tokens never enter the
+LCARS webview or Warp Core.
 
 The command model may inspect the generic project context and recommend
 provider, model, tool, and focus assignments for each department. Those
@@ -80,17 +85,19 @@ native adapters outside the webview. A public `github` or `local-git` adapter
 can serve ordinary repositories, while a private project may supply an external
 adapter without modifying or forking the harness.
 
-Every newly connected project is read-only. Write access requires a separate,
-explicit owner authorization and an opaque reference to credentials held by the
-operating-system secret store. A repository URL, successful read, or staffing
-brief can never imply permission to create branches, commits, issues, pull
-requests, or releases. GitHub authorization uses a native OAuth/GitHub App or
-credential-manager flow; passwords and tokens are never collected by the LCARS
-webview or written into Warp Core.
+Every newly connected project is read-only. GitHub account sign-in permits
+identity verification and repository discovery only. Write access requires a
+separate, explicit owner authorization and an opaque reference to credentials
+held by the operating-system secret store. A repository URL, successful read,
+or staffing brief can never imply permission to create branches, commits,
+issues, pull requests, or releases. GitHub authorization uses a native
+OAuth/GitHub App or credential-manager flow; passwords and tokens are never
+collected by the LCARS webview or written into Warp Core.
 
 The first native credential provider delegates browser authorization and token
-custody to GitHub CLI. The Rust process then uses `gh api`/GraphQL to read the
-signed-in account and its exact repository permission. Warp Core upgrades the
+custody to GitHub CLI. The Rust process uses the CLI-backed GitHub API to read
+the signed-in account and repository list. When write authority is requested,
+it also checks the exact repository permission. Warp Core upgrades the
 connection to `read_write` only for `WRITE`, `MAINTAIN`, or `ADMIN`, and stores
 only an opaque `gh-cli:github.com/<account>` profile reference.
 
