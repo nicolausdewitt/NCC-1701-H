@@ -54,8 +54,13 @@ never part of this assignment and will be resolved through a separate secret
 store.
 
 Commissioning starts with a separate command model behind the Captain
-interface. The owner connects a project, assigns that command model, and gives
-it a staffing brief. It may inspect the generic project context and recommend
+interface. The owner connects a project, authenticates OpenAI, and gives the
+command model a staffing brief. The initial native adapter reuses Codex's
+supported **Sign in with ChatGPT** browser flow and shared credential cache.
+NCC stores only `codex-cli:shared-login`; ChatGPT credentials and access tokens
+never enter the LCARS webview or Warp Core.
+
+The command model may inspect the generic project context and recommend
 provider, model, tool, and focus assignments for each department. Those
 recommendations remain proposals until the owner approves them; a command model
 cannot silently grant credentials or expand agent authority.

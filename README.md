@@ -74,7 +74,7 @@ the professional role to a particular vendor.
 The public harness follows a three-step commissioning flow:
 
 1. connect any GitHub, local Git, or external project adapter;
-2. connect the command model behind the Captain interface;
+2. connect OpenAI behind the Captain interface using **Sign in with ChatGPT**;
 3. give that model a staffing brief and approve its proposed assignments for
    the department heads.
 
@@ -82,6 +82,10 @@ The project record contains a repository locator and optional local checkout,
 not a token. Git and model credentials remain in native adapters and secret
 stores. A private codebase is therefore connected at runtime rather than copied
 into, referenced by, or compiled with NCC-1701-H.
+
+OpenAI authentication is delegated to the native Codex login flow. The default
+button opens browser sign-in when needed and otherwise reuses the existing
+ChatGPT session; Warp Core records only a non-secret adapter profile.
 
 Connections begin read-only. The Bridge offers a separate GitHub authorization
 step before any agent may change a repository, and stores only a native

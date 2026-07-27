@@ -197,24 +197,31 @@
 
             <article class="settings-panel command-model-settings">
               <header>
-                <span>02 / CONNECT COMMAND MODEL</span>
+                <span>02 / CONNECT OPENAI</span>
                 <b>PICARD</b>
               </header>
-              <form id="command-model-form" class="command-model-form">
-                <label>
-                  <span>PROVIDER</span>
-                  <input id="command-provider-input" name="provider" required placeholder="openai" />
-                </label>
-                <label>
-                  <span>MODEL</span>
-                  <input id="command-model-input" name="model" required placeholder="command model" />
-                </label>
-                <label class="wide">
-                  <span>ENDPOINT <small>OPTIONAL</small></span>
-                  <input id="command-endpoint-input" name="endpoint" placeholder="Provider default" />
-                </label>
-                <button type="submit">CONNECT MODEL</button>
-              </form>
+              <div class="provider-auth-card">
+                <span class="provider-mark" aria-hidden="true">AI</span>
+                <span class="provider-auth-copy">
+                  <strong>OPENAI</strong>
+                  <small>SIGN IN WITH CHATGPT</small>
+                </span>
+                <button id="openai-connect-button" type="button">CONNECT OPENAI</button>
+              </div>
+              <div
+                id="openai-connection-result"
+                class="connection-result provider-connection-result"
+                data-state="idle"
+                role="status"
+                aria-live="polite"
+              >
+                <i aria-hidden="true"></i>
+                <span>
+                  <strong id="openai-result-title">NOT CONNECTED</strong>
+                  <small id="openai-result-detail">BROWSER SIGN-IN · NO PASSWORD IN LCARS</small>
+                </span>
+                <b id="openai-model-label">MODEL · AUTO</b>
+              </div>
               <form id="staffing-form" class="staffing-form">
                 <label>
                   <span>STAFFING BRIEF</span>

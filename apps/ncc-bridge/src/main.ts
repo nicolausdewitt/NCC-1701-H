@@ -49,9 +49,18 @@ type GithubWriteAuthorization = {
   permission: string;
 };
 
+type OpenAiConnection = {
+  provider: string;
+  adapter: string;
+  auth_method: string;
+  credential_profile: string;
+  status: string;
+};
+
 type Scene = "bridge" | "plan" | "engineering" | "crew";
 
 const isNative = "__TAURI_INTERNALS__" in window;
+let openAiConnection: OpenAiConnection | null = null;
 let activeCrew: CrewManifest = {
   command_model: {
     provider: "provider-a",
@@ -167,10 +176,11 @@ const projectResultDetail = document.querySelector<HTMLElement>("#project-result
 const projectStepState = document.querySelector<HTMLElement>("#project-step-state");
 const githubAuthorizeButton = document.querySelector<HTMLButtonElement>("#github-authorize-button");
 const commandModelSettings = document.querySelector<HTMLElement>(".command-model-settings");
-const commandModelForm = document.querySelector<HTMLFormElement>("#command-model-form");
-const commandProviderInput = document.querySelector<HTMLInputElement>("#command-provider-input");
-const commandModelInput = document.querySelector<HTMLInputElement>("#command-model-input");
-const commandEndpointInput = document.querySelector<HTMLInputElement>("#command-endpoint-input");
+const openAiConnectButton = document.querySelector<HTMLButtonElement>("#openai-connect-button");
+const openAiConnectionResult = document.querySelector<HTMLElement>("#openai-connection-result");
+const openAiResultTitle = document.querySelector<HTMLElement>("#openai-result-title");
+const openAiResultDetail = document.querySelector<HTMLElement>("#openai-result-detail");
+const openAiModelLabel = document.querySelector<HTMLElement>("#openai-model-label");
 const staffingForm = document.querySelector<HTMLFormElement>("#staffing-form");
 const staffingPrompt = document.querySelector<HTMLTextAreaElement>("#staffing-prompt");
 
@@ -273,30 +283,46 @@ projectForm?.addEventListener("submit", async (event) => {
   }
 });
 
-commandModelForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!commandProviderInput || !commandModelInput || !commandEndpointInput) return;
+openAiConnectButton?.addEventListener("click", async () => {
+  openAiConnectButton.disabled = true;
+  openAiConnectButton.textContent = isNative ? "OPENING SIGN-IN…" : "CHECKING NATIVE APP…";
+  setOpenAiConnectionFeedback(
+    "connecting",
+    isNative ? "CONTACTING OPENAI" : "NATIVE HANDOFF REQUIRED",
+    isNative ? "CHECKING CODEX SESSION" : "SIGN-IN RUNS OUTSIDE THE WEBVIEW",
+  );
+  const startedAt = performance.now();
 
-  const model: ModelAssignment = {
-    provider: commandProviderInput.value.trim(),
-    model: commandModelInput.value.trim(),
-    endpoint: commandEndpointInput.value.trim() || null,
-  };
-  const submit = commandModelForm.querySelector<HTMLButtonElement>("button[type='submit']");
-  if (submit) submit.disabled = true;
+  if (!isNative) {
+    await holdFeedbackFor(startedAt, 600);
+    setOpenAiConnectionFeedback(
+      "preview",
+      "NATIVE APP REQUIRED",
+      "OPEN NCC TO SIGN IN WITH CHATGPT",
+    );
+    openAiConnectButton.textContent = "CONNECT OPENAI";
+    openAiConnectButton.disabled = false;
+    return;
+  }
 
   try {
-    if (isNative) {
-      activeCrew = await invoke<CrewManifest>("assign_command_model", { model });
-    } else {
-      activeCrew = { ...activeCrew, command_model: model };
-    }
+    openAiConnection = await invoke<OpenAiConnection>("authorize_openai");
+    const model: ModelAssignment = {
+      provider: "openai-codex",
+      model: "codex-default",
+      endpoint: null,
+    };
+    activeCrew = await invoke<CrewManifest>("assign_command_model", { model });
+    await holdFeedbackFor(startedAt, 600);
+    renderOpenAiConnection(openAiConnection);
     renderCommandModel(activeCrew);
-    setText("#system-status", "PICARD · COMMAND MODEL CONNECTED");
+    setText("#system-status", "OPENAI CONNECTED · PICARD COMMAND MODEL READY");
   } catch (error) {
-    setText("#system-status", `COMMAND MODEL REJECTED · ${String(error)}`);
+    setOpenAiConnectionFeedback("error", "OPENAI SIGN-IN FAILED", String(error));
+    openAiConnectButton.textContent = "RETRY OPENAI";
+    setText("#system-status", `OPENAI SIGN-IN FAILED · ${String(error)}`);
   } finally {
-    if (submit) submit.disabled = false;
+    openAiConnectButton.disabled = false;
   }
 });
 
@@ -304,9 +330,9 @@ staffingForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = staffingPrompt?.value.trim() ?? "";
   if (!prompt || !staffingPrompt) return;
-  if (!activeCrew.command_model) {
-    setText("#system-status", "CONNECT THE COMMAND MODEL BEFORE SUBMITTING A STAFFING BRIEF");
-    commandProviderInput?.focus();
+  if (!openAiConnection) {
+    setText("#system-status", "CONNECT OPENAI BEFORE SUBMITTING A STAFFING BRIEF");
+    openAiConnectButton?.focus();
     return;
   }
 
@@ -346,12 +372,14 @@ async function connectWarpCore() {
   }
 
   try {
-    const [crew, status, project] = await Promise.all([
+    const [crew, status, project, openAi] = await Promise.all([
       invoke<CrewManifest>("get_crew_manifest"),
       invoke<WarpCoreStatus>("get_warp_core_status"),
       invoke<ProjectConnection | null>("get_project_connection"),
+      invoke<OpenAiConnection | null>("get_openai_connection"),
     ]);
     activeCrew = crew;
+    openAiConnection = openAi;
     setText(
       "#system-status",
       `WARP CORE ONLINE · ${crew.leaders.length} OFFICERS · ${status.queued + status.retry} TO BASE`,
@@ -375,6 +403,7 @@ async function connectWarpCore() {
       if (projectConnectButton) projectConnectButton.textContent = "UPDATE PROJECT";
       if (projectStepState) projectStepState.textContent = "WARP CORE SAVED";
     }
+    if (openAi) renderOpenAiConnection(openAi);
   } catch (error) {
     setText("#system-status", `WARP CORE OFFLINE · ${String(error)}`);
   }
@@ -387,10 +416,37 @@ function renderCrew(crew: CrewManifest) {
 }
 
 function renderCommandModel(crew: CrewManifest) {
+  if (!openAiConnection) {
+    if (openAiModelLabel) openAiModelLabel.textContent = "MODEL · AFTER SIGN-IN";
+    return;
+  }
   if (!crew.command_model) return;
-  if (commandProviderInput) commandProviderInput.value = crew.command_model.provider;
-  if (commandModelInput) commandModelInput.value = crew.command_model.model;
-  if (commandEndpointInput) commandEndpointInput.value = crew.command_model.endpoint ?? "";
+  if (openAiModelLabel) {
+    openAiModelLabel.textContent =
+      crew.command_model.model === "codex-default"
+        ? "MODEL · AUTO"
+        : `MODEL · ${crew.command_model.model.toUpperCase()}`;
+  }
+}
+
+function renderOpenAiConnection(connection: OpenAiConnection) {
+  const method = connection.auth_method === "chatgpt" ? "CHATGPT" : "API KEY";
+  setOpenAiConnectionFeedback("connected", "OPENAI CONNECTED", `${method} · CODEX SESSION`);
+  if (openAiConnectButton) openAiConnectButton.textContent = "OPENAI CONNECTED";
+  commandModelSettings?.classList.remove("next-step");
+}
+
+function setOpenAiConnectionFeedback(
+  state: "idle" | "connecting" | "connected" | "preview" | "error",
+  title: string,
+  detail: string,
+) {
+  if (openAiConnectionResult) openAiConnectionResult.dataset.state = state;
+  if (openAiResultTitle) openAiResultTitle.textContent = title;
+  if (openAiResultDetail) openAiResultDetail.textContent = detail;
+  if (state === "connected" || state === "preview" || state === "error") {
+    pulseRefresh(openAiConnectionResult);
+  }
 }
 
 function renderModelAssignments(crew: CrewManifest) {

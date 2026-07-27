@@ -4,12 +4,14 @@ use ncc_core::{
     CrewId, CrewManifest, ModelAssignment, ProjectAccess, ProjectConnection, example_manifest,
 };
 use ncc_warpcore::{SaveIntent, ServerSaveCommand, WarpCore, WarpCoreStatus};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 const SYSTEM_COLLECTION: &str = "system";
 const CREW_MANIFEST_ID: &str = "crew-manifest";
 const PROJECT_CONNECTION_ID: &str = "active-project";
+const PROVIDER_COLLECTION: &str = "provider_connections";
+const OPENAI_CONNECTION_ID: &str = "openai";
 
 struct BridgeState {
     warp_core: Arc<WarpCore>,
@@ -20,6 +22,15 @@ struct GithubWriteAuthorization {
     connection: ProjectConnection,
     account: String,
     permission: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct OpenAiConnection {
+    provider: String,
+    adapter: String,
+    auth_method: String,
+    credential_profile: String,
+    status: String,
 }
 
 /// Read requests also pass through the Warp Core. The webview never opens or
@@ -315,6 +326,115 @@ fn github_repository_slug(repository: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn get_openai_connection(
+    state: State<'_, BridgeState>,
+) -> Result<Option<OpenAiConnection>, String> {
+    let warp_core = state.warp_core.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        warp_core
+            .document(PROVIDER_COLLECTION, OPENAI_CONNECTION_ID)
+            .map_err(|error| error.to_string())?
+            .map(|stored| {
+                stored
+                    .document
+                    .ok_or_else(|| "OpenAI connection has been deleted".to_string())
+                    .and_then(|value| {
+                        serde_json::from_value(value).map_err(|error| error.to_string())
+                    })
+            })
+            .transpose()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Reuses Codex's supported OpenAI authentication boundary. The browser flow
+/// and token cache belong to Codex; NCC stores only a non-secret profile
+/// reference and never receives a ChatGPT password or access token.
+#[tauri::command]
+async fn authorize_openai(state: State<'_, BridgeState>) -> Result<OpenAiConnection, String> {
+    let warp_core = state.warp_core.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let auth_method = ensure_codex_openai_authorized()?;
+        let connection = OpenAiConnection {
+            provider: "openai".into(),
+            adapter: "codex-cli".into(),
+            auth_method,
+            credential_profile: "codex-cli:shared-login".into(),
+            status: "connected".into(),
+        };
+
+        let current = warp_core
+            .document(PROVIDER_COLLECTION, OPENAI_CONNECTION_ID)
+            .map_err(|error| error.to_string())?;
+        let mut intent = SaveIntent::upsert(
+            PROVIDER_COLLECTION,
+            OPENAI_CONNECTION_ID,
+            serde_json::to_value(&connection).map_err(|error| error.to_string())?,
+        );
+        intent.expected_local_version = current.map(|stored| stored.local_version);
+        warp_core.save(intent).map_err(|error| error.to_string())?;
+        Ok(connection)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+fn ensure_codex_openai_authorized() -> Result<String, String> {
+    if let Some(method) = codex_login_status()? {
+        return Ok(method);
+    }
+
+    let login = Command::new("codex")
+        .args(["--config", "model_reasoning_effort=xhigh", "login"])
+        .output()
+        .map_err(|error| format!("could not start OpenAI browser sign-in: {error}"))?;
+    if !login.status.success() {
+        return Err("OpenAI browser sign-in was not completed".into());
+    }
+
+    codex_login_status()?
+        .ok_or_else(|| "Codex did not report an authenticated OpenAI session".to_string())
+}
+
+fn codex_login_status() -> Result<Option<String>, String> {
+    let output = Command::new("codex")
+        .args([
+            "--config",
+            "model_reasoning_effort=xhigh",
+            "login",
+            "status",
+        ])
+        .output()
+        .map_err(|error| format!("Codex CLI is required for OpenAI sign-in: {error}"))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let status = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(parse_codex_auth_method(&status).map(str::to_string))
+}
+
+fn parse_codex_auth_method(status: &str) -> Option<&'static str> {
+    let normalized = status.to_ascii_lowercase();
+    if normalized.contains("not logged") || normalized.contains("signed out") {
+        None
+    } else if normalized.contains("chatgpt") {
+        Some("chatgpt")
+    } else if normalized.contains("api key") || normalized.contains("api-key") {
+        Some("api_key")
+    } else if normalized.contains("logged in") {
+        Some("codex")
+    } else {
+        None
+    }
+}
+
+#[tauri::command]
 async fn submit_captain_message(
     state: State<'_, BridgeState>,
     message_id: String,
@@ -431,6 +551,8 @@ pub fn run() {
             get_project_connection,
             connect_project,
             authorize_github_writes,
+            get_openai_connection,
+            authorize_openai,
             submit_captain_message,
             submit_staffing_brief
         ])
@@ -440,7 +562,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::github_repository_slug;
+    use super::{github_repository_slug, parse_codex_auth_method};
 
     #[test]
     fn parses_https_and_ssh_github_repositories() {
@@ -458,5 +580,18 @@ mod tests {
     fn rejects_non_github_and_nested_paths() {
         assert!(github_repository_slug("https://example.com/owner/repo").is_err());
         assert!(github_repository_slug("https://github.com/owner/repo/issues").is_err());
+    }
+
+    #[test]
+    fn recognizes_codex_openai_authentication_methods() {
+        assert_eq!(
+            parse_codex_auth_method("Logged in using ChatGPT"),
+            Some("chatgpt")
+        );
+        assert_eq!(
+            parse_codex_auth_method("Logged in using an API key"),
+            Some("api_key")
+        );
+        assert_eq!(parse_codex_auth_method("Not logged in"), None);
     }
 }

@@ -410,6 +410,73 @@ body[data-scene="crew"] .commissioning {
 }
 .project-form button { background: var(--blue); }
 .command-model-form button { background: var(--salmon); }
+.provider-auth-card {
+  min-height: 50px;
+  margin: 7px 10px 4px;
+  border: 1px solid #39455e;
+  border-left: 5px solid var(--salmon);
+  border-radius: 6px;
+  padding: 6px 7px;
+  background: #0a0f1a;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.provider-mark {
+  width: 34px;
+  height: 30px;
+  border-radius: 4px 14px 14px 4px;
+  color: var(--ink);
+  background: var(--salmon);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: .05em;
+}
+.provider-auth-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.provider-auth-copy strong {
+  color: #f2f4f8;
+  font-size: 14px;
+  letter-spacing: .08em;
+}
+.provider-auth-copy small {
+  color: #8793a8;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.provider-auth-card button {
+  min-height: 30px;
+  border: 0;
+  border-radius: 16px;
+  padding: 5px 12px;
+  color: var(--ink);
+  background: var(--salmon);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+.provider-auth-card button:disabled {
+  cursor: wait;
+  opacity: .72;
+}
+.provider-connection-result {
+  margin: 0 10px 2px;
+}
+.provider-connection-result > b {
+  margin-left: auto;
+  color: var(--lavender);
+  font-size: 9px;
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
 .project-form button,
 .connection-result,
 .command-model-settings {
